@@ -104,7 +104,7 @@ src/
 │       └── IOracleSimple.sol
 ├── governance/
 │   ├── GovToken.sol                # ERC-20 治理代币（可铸造）
-│   ├── VotingEscrow.sol            # ve 锁仓机制（ERC-721）
+│   ├── VotingEscrow.sol            # ve 锁仓机制
 │   └── interfaces/
 │       ├── IGovToken.sol
 │       └── IVotingEscrow.sol
@@ -157,9 +157,6 @@ test/
 
 **src/amm/interfaces/IPair.sol**
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
 interface IPair {
     // ═══════════════════════════════════════════
     //                  EVENTS
@@ -231,9 +228,6 @@ interface IPair {
 **src/amm/interfaces/IPairFactory.sol**
 
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
 interface IPairFactory {
     // ═══════════════════════════════════════════
     //                  EVENTS
@@ -344,9 +338,6 @@ interface IPairFactory {
 
 **src/amm/interfaces/IRouter.sol**
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
 interface IRouter {
     // ═══════════════════════════════════════════
     //              IMMUTABLES
@@ -540,9 +531,6 @@ interface IRouter {
 
 **src/oracle/interfaces/IOracleSimple.sol**
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
 interface IOracleSimple {
     // ═══════════════════════════════════════════
     //                  EVENTS
@@ -641,11 +629,6 @@ function isReady() external view returns (bool);
 
 **src/governance/interfaces/IGovToken.sol**
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
 interface IGovToken is IERC20 {
     // ═══════════════════════════════════════════
     //                  EVENTS
@@ -709,83 +692,41 @@ interface IGovToken is IERC20 {
 
 **src/governance/interfaces/IVotingEscrow.sol**
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
 interface IVotingEscrow {
-    // ═══════════════════════════════════════════
-    //                 STRUCTS
-    // ═══════════════════════════════════════════
     struct LockedBalance {
         int128 amount;
-        uint256 end; // 锁定到期时间（按 week 对齐）
+        uint256 end;
     }
 
-    // ═══════════════════════════════════════════
-    //                  EVENTS
-    // ═══════════════════════════════════════════
-    event Deposit(
-        address indexed provider,
-        uint256 indexed tokenId,
-        uint256 value,
-        uint256 lockTime,
-        uint256 timestamp
-    );
-    event Withdraw(address indexed provider, uint256 indexed tokenId, uint256 value, uint256 timestamp);
+    /// @notice 锁仓创建 ve 权重（msg.sender）
+    function createLock(uint256 value, uint256 lockDuration) external;
 
-    // ═══════════════════════════════════════════
-    //              READ FUNCTIONS
-    // ═══════════════════════════════════════════
+    /// @notice 追加锁仓量
+    function increaseAmount(uint256 value) external;
 
-    /// @notice 锁仓的底层 ERC-20 代币
-    function token() external view returns (address);
+    /// @notice 延长锁定期
+    function increaseUnlockTime(uint256 newUnlockTime) external;
 
-    /// @notice 当前已发行的 veNFT 总数
-    function tokenId() external view returns (uint256);
+    /// @notice 到期提取，清零 ve 权重
+    function withdraw() external;
 
-    /// @notice 查询某个 veNFT 的锁仓信息
-    function locked(uint256 _tokenId) external view returns (LockedBalance memory);
+    /// @notice 当前投票权重（线性衰减）
+    function balanceOf(address addr) external view returns (uint256);
 
-    /// @notice 查询某个 veNFT 在当前时刻的投票权重
-    /// @dev 权重 = amount * (lockEnd - now) / MAX_LOCK_TIME，线性衰减
-    function balanceOfNFT(uint256 _tokenId) external view returns (uint256);
+    /// @notice 指定时间点的投票权重
+    function balanceOfAt(address addr, uint256 timestamp) external view returns (uint256);
 
-    /// @notice 查询某个 veNFT 在指定时间点的投票权重
-    function balanceOfNFTAt(uint256 _tokenId, uint256 _t) external view returns (uint256);
-
-    /// @notice 全局总投票权重
+    /// @notice 全局总权重
     function totalSupply() external view returns (uint256);
 
-    /// @notice 指定时间点的全局总投票权重
-    function totalSupplyAt(uint256 _t) external view returns (uint256);
+    /// @notice 指定时间点的总权重
+    function totalSupplyAt(uint256 timestamp) external view returns (uint256);
 
-    /// @notice 最大锁定时间（4 年 = 4 * 365 * 86400）
-    function MAX_LOCK_TIME() external view returns (uint256);
+    /// @notice 查询锁仓信息
+    function locked(address addr) external view returns (LockedBalance memory);
 
-    /// @notice 查询 veNFT 的 owner
-    function ownerOf(uint256 _tokenId) external view returns (address);
-
-    // ═══════════════════════════════════════════
-    //             WRITE FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 创建锁仓，铸造 veNFT
-    /// @param _value 锁入的代币数量
-    /// @param _lockDuration 锁定时长（秒），会向下对齐到整周
-    /// @return _tokenId 新铸造的 veNFT ID
-    function createLock(uint256 _value, uint256 _lockDuration) external returns (uint256 _tokenId);
-
-    /// @notice 增加锁仓数量（不改变到期时间）
-    function increaseAmount(uint256 _tokenId, uint256 _value) external;
-
-    /// @notice 延长锁定时间（不增加数量）
-    function increaseUnlockTime(uint256 _tokenId, uint256 _lockDuration) external;
-
-    /// @notice 到期后提取全部代币，销毁 veNFT
-    function withdraw(uint256 _tokenId) external;
-
-    /// @notice 合并两个 veNFT（将 _from 并入 _to）
-    function merge(uint256 _from, uint256 _to) external;
+    event Deposit(address indexed provider, uint256 value, uint256 locktime, uint256 ts);
+    event Withdraw(address indexed provider, uint256 value, uint256 ts);
 }
 ```
 ---
@@ -794,69 +735,39 @@ interface IVotingEscrow {
 #### GaugeController.sol
 **src/incentives/interfaces/IGaugeController.sol**
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
 interface IGaugeController {
-    // ═══════════════════════════════════════════
-    //                  EVENTS
-    // ═══════════════════════════════════════════
-    event GaugeAdded(address indexed gauge);
-    event VoteForGauge(address indexed voter, uint256 indexed tokenId, address indexed gauge, uint256 weight);
-    event NewEpoch(uint256 epoch, uint256 timestamp);
+    /// @notice 注册新 gauge（仅 owner）
+    function addGauge(address gauge, int128 gaugeType, uint256 weight) external;
 
-    // ═══════════════════════════════════════════
-    //              READ FUNCTIONS
-    // ═══════════════════════════════════════════
+    /// @notice 用 msg.sender 的 ve 余额投票
+    /// @param gauge 目标 gauge 地址
+    /// @param weight 分配权重（BPS，总和 ≤ 10000）
+    function voteForGaugeWeights(address gauge, uint256 weight) external;
 
-    /// @notice VotingEscrow 合约地址
-    function votingEscrow() external view returns (address);
+    /// @notice 推进 epoch，结算权重
+    function checkpoint() external;
 
-    /// @notice 一个 epoch 的时长（7 天）
-    function EPOCH_DURATION() external view returns (uint256);
+    /// @notice 对单个 gauge 做 checkpoint
+    function checkpointGauge(address gauge) external;
 
-    /// @notice 当前 epoch 编号
-    function currentEpoch() external view returns (uint256);
-
-    /// @notice 某个 gauge 在当前 epoch 的权重占比 (basis points, 10000 = 100%)
-    function gaugeWeight(address gauge) external view returns (uint256);
-
-    /// @notice 某个 gauge 的相对权重（归一化后，精度 1e18）
-    /// @dev relativeWeight = gaugeWeight / totalWeight
+    /// @notice 查询 gauge 归一化权重（1e18 = 100%）
     function gaugeRelativeWeight(address gauge) external view returns (uint256);
 
-    /// @notice 某个 gauge 在指定 epoch 的相对权重
-    function gaugeRelativeWeightAt(address gauge, uint256 epoch) external view returns (uint256);
+    /// @notice 查询指定时间的归一化权重
+    function gaugeRelativeWeight(address gauge, uint256 time) external view returns (uint256);
 
-    /// @notice 全部已注册的 gauge 列表
-    function gauges() external view returns (address[] memory);
+    /// @notice gauge 总数
+    function gaugeCount() external view returns (uint256);
 
-    /// @notice gauge 是否已注册
-    function isGauge(address gauge) external view returns (bool);
+    /// @notice 用户上次投票时间
+    function lastUserVote(address user, address gauge) external view returns (uint256);
 
-    /// @notice 查询某个 veNFT 在本 epoch 剩余可用投票权重
-    function usedVotePower(uint256 tokenId) external view returns (uint256);
+    /// @notice 用户对某 gauge 的已分配权重
+    function voteUserSlopes(address user, address gauge)
+        external view returns (uint256 slope, uint256 power, uint256 end);
 
-    // ═══════════════════════════════════════════
-    //             WRITE FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 注册新 gauge（仅 governance/owner）
-    function addGauge(address gauge) external;
-
-    /// @notice 移除 gauge（仅 governance/owner）
-    function removeGauge(address gauge) external;
-
-    /// @notice 用 veNFT 给 gauge 投票
-    /// @param tokenId 投票者持有的 veNFT
-    /// @param gaugeVotes 数组：每个元素 = (gauge地址, 权重百分比)
-    function vote(uint256 tokenId, address[] calldata gaugeAddresses, uint256[] calldata weights) external;
-
-    /// @notice 重置某个 veNFT 的所有投票
-    function reset(uint256 tokenId) external;
-
-    /// @notice 推进到新 epoch，结算权重（Keeper 调用）
-    function checkpoint() external;
+    event NewGauge(address indexed gauge, int128 gaugeType, uint256 weight);
+    event VoteForGauge(address indexed user, address indexed gauge, uint256 weight);
 }
 ```
 
@@ -871,9 +782,6 @@ interface IGaugeController {
 #### LiquidityGauge.sol
 **src/incentives/interfaces/ILiquidityGauge.sol**
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
 interface ILiquidityGauge {
     // ═══════════════════════════════════════════
     //                  EVENTS
@@ -957,56 +865,30 @@ interface ILiquidityGauge {
 #### FeeDistributor.sol
 **src/incentives/interfaces/IFeeDistributor.sol**
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
 interface IFeeDistributor {
-    // ═══════════════════════════════════════════
-    //                  EVENTS
-    // ═══════════════════════════════════════════
-    event CheckpointToken(uint256 timestamp, uint256 tokens);
-    event Claimed(uint256 indexed tokenId, uint256 amount, uint256 epoch);
-
-    // ═══════════════════════════════════════════
-    //              READ FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice VotingEscrow 合约
-    function votingEscrow() external view returns (address);
-
-    /// @notice 分发的代币（可以是某个稳定币或 WETH，取决于协议费收集方式）
-    function token() external view returns (address);
-
-    /// @notice 起始时间戳（向下对齐到 epoch 起点）
-    function startTime() external view returns (uint256);
-
-    /// @notice 每个 epoch 分配的 fee token 总量
-    function tokensPerEpoch(uint256 epoch) external view returns (uint256);
-
-    /// @notice 某个 veNFT 上次领取到哪个 epoch
-    function lastClaimEpoch(uint256 tokenId) external view returns (uint256);
-
-    /// @notice 某个 veNFT 可领取的累计待领金额
-    function claimable(uint256 tokenId) external view returns (uint256);
-
-    // ═══════════════════════════════════════════
-    //             WRITE FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 记录新的 fee token 到当前 epoch（Keeper 调用）
-    /// @dev 读取合约余额增量，分配到本 epoch
+    /// @notice 记录本期手续费到当前 epoch
     function checkpointToken() external;
 
-    /// @notice 记录 VotingEscrow 的 totalSupply 快照
+    /// @notice 快照 ve 总供应量
     function checkpointTotalSupply() external;
 
-    /// @notice 领取指定 veNFT 的累积手续费分红
-    /// @param tokenId veNFT ID
-    /// @return amount 领取的数量
-    function claim(uint256 tokenId) external returns (uint256 amount);
+    /// @notice 按地址领取手续费分红
+    function claim(address addr) external returns (uint256);
 
-    /// @notice 批量领取多个 veNFT 的分红
-    function claimMany(uint256[] calldata tokenIds) external returns (uint256[] memory amounts);
+    /// @notice 批量领取
+    function claimMany(address[] calldata addrs) external returns (uint256[] memory);
+
+    /// @notice 查询可领数量
+    function claimable(address addr) external view returns (uint256);
+
+    /// @notice 开始分配的时间戳
+    function startTime() external view returns (uint256);
+
+    /// @notice 关联的 VotingEscrow 合约
+    function votingEscrow() external view returns (address);
+
+    event Claimed(address indexed recipient, uint256 amount, uint256 epoch);
+    event TokenCheckpointed(uint256 amount, uint256 epoch);
 }
 ```
 
