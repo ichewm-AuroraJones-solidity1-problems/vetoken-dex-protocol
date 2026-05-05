@@ -155,122 +155,6 @@ test/
 
 **核心不变量：** 每次 swap 后，`balance0Adjusted × balance1Adjusted ≥ reserve0 × reserve1 × 1000²`
 
-**src/amm/interfaces/IPair.sol**
-```solidity
-interface IPair {
-    // ═══════════════════════════════════════════
-    //                  EVENTS
-    // ═══════════════════════════════════════════
-    event Mint(address indexed sender, uint256 amount0, uint256 amount1);
-    event Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to);
-    event Swap(
-        address indexed sender,
-        uint256 amount0In,
-        uint256 amount1In,
-        uint256 amount0Out,
-        uint256 amount1Out,
-        address indexed to
-    );
-    event Sync(uint112 reserve0, uint112 reserve1);
-
-    // ═══════════════════════════════════════════
-    //              READ FUNCTIONS
-    // ═══════════════════════════════════════════
-    function factory() external view returns (address);
-    function token0() external view returns (address);
-    function token1() external view returns (address);
-
-    function getReserves()
-        external
-        view
-        returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
-
-    function price0CumulativeLast() external view returns (uint256);
-    function price1CumulativeLast() external view returns (uint256);
-
-    /// @notice 上一次收取协议费时的 k 值
-    function kLast() external view returns (uint256);
-
-    function MINIMUM_LIQUIDITY() external pure returns (uint256);
-
-    // ═══════════════════════════════════════════
-    //             WRITE FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 由 Factory 调用一次，设置交易对的两个代币
-    function initialize(address token0, address token1) external;
-
-    /// @notice 铸造 LP token，调用前需先将两种代币转入 Pair
-    /// @return liquidity 铸造的 LP 数量
-    function mint(address to) external returns (uint256 liquidity);
-
-    /// @notice 销毁 LP token 取回底层资产，调用前需先将 LP 转入 Pair
-    /// @return amount0 返还的 token0 数量
-    /// @return amount1 返还的 token1 数量
-    function burn(address to) external returns (uint256 amount0, uint256 amount1);
-
-    /// @notice 执行兑换，调用前需先将输入代币转入 Pair
-    /// @param amount0Out 期望获得的 token0 数量
-    /// @param amount1Out 期望获得的 token1 数量
-    /// @param to 接收地址
-    /// @param data 非空则触发 flash swap 回调
-    function swap(uint256 amount0Out, uint256 amount1Out, address to, bytes calldata data) external;
-
-    /// @notice 将余额同步到 reserves（处理意外转入的代币）
-    function skim(address to) external;
-
-    /// @notice 强制 reserves 匹配实际余额
-    function sync() external;
-}
-```
-
-#### IPairFactory
-**src/amm/interfaces/IPairFactory.sol**
-
-```solidity
-interface IPairFactory {
-    // ═══════════════════════════════════════════
-    //                  EVENTS
-    // ═══════════════════════════════════════════
-    event PairCreated(address indexed token0, address indexed token1, address pair, uint256 totalPairs);
-
-    // ═══════════════════════════════════════════
-    //              READ FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 协议手续费接收地址（address(0) 表示不收取）
-    function feeTo() external view returns (address);
-
-    /// @notice 有权修改 feeTo 的管理员
-    function feeToSetter() external view returns (address);
-
-    /// @notice 查询两个代币对应的 Pair 地址
-    function getPair(address tokenA, address tokenB) external view returns (address pair);
-
-    /// @notice 按索引获取 Pair 地址
-    function allPairs(uint256 index) external view returns (address pair);
-
-    /// @notice 已创建的 Pair 总数
-    function allPairsLength() external view returns (uint256);
-
-    /// @notice 用于 CREATE2 部署时计算地址的 init code hash
-    function pairCodeHash() external pure returns (bytes32);
-
-    // ═══════════════════════════════════════════
-    //             WRITE FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 创建交易对，使用 CREATE2 确定性部署
-    /// @return pair 新创建的 Pair 合约地址
-    function createPair(address tokenA, address tokenB) external returns (address pair);
-
-    /// @notice 设置协议费接收地址
-    function setFeeTo(address) external;
-
-    /// @notice 转移 feeToSetter 权限
-    function setFeeToSetter(address) external;
-}
-```
 
 #### Router.sol — 滑点保护
 
@@ -327,189 +211,16 @@ interface IPairFactory {
 等待打包中...
 
 情况 A: 20分钟内被打包，输出 2980 USDC
-→ 2980 ≥ 2970 ✅ 交易成功
+→ 2980 ≥ 2970  交易成功
 
 情况 B: 20分钟内被打包，但被三明治攻击，输出仅 2950 USDC
-→ 2950 < 2970 ❌ revert "INSUFFICIENT_OUTPUT_AMOUNT"
+→ 2950 < 2970  revert "INSUFFICIENT_OUTPUT_AMOUNT"
 
 情况 C: 网络拥堵，25分钟后才被打包
-→ block.timestamp > deadline ❌ revert "EXPIRED"
+→ block.timestamp > deadline  revert "EXPIRED"
 ```
 
-**src/amm/interfaces/IRouter.sol**
-```solidity
-interface IRouter {
-    // ═══════════════════════════════════════════
-    //              IMMUTABLES
-    // ═══════════════════════════════════════════
-    function factory() external view returns (address);
-    function WETH() external view returns (address);
 
-    // ═══════════════════════════════════════════
-    //            ADD LIQUIDITY
-    // ═══════════════════════════════════════════
-
-    function addLiquidity(
-        address tokenA,
-        address tokenB,
-        uint256 amountADesired,
-        uint256 amountBDesired,
-        uint256 amountAMin,
-        uint256 amountBMin,
-        address to,
-        uint256 deadline
-    ) external returns (uint256 amountA, uint256 amountB, uint256 liquidity);
-
-    function addLiquidityETH(
-        address token,
-        uint256 amountTokenDesired,
-        uint256 amountTokenMin,
-        uint256 amountETHMin,
-        address to,
-        uint256 deadline
-    ) external payable returns (uint256 amountToken, uint256 amountETH, uint256 liquidity);
-
-    // ═══════════════════════════════════════════
-    //           REMOVE LIQUIDITY
-    // ═══════════════════════════════════════════
-
-    function removeLiquidity(
-        address tokenA,
-        address tokenB,
-        uint256 liquidity,
-        uint256 amountAMin,
-        uint256 amountBMin,
-        address to,
-        uint256 deadline
-    ) external returns (uint256 amountA, uint256 amountB);
-
-    function removeLiquidityETH(
-        address token,
-        uint256 liquidity,
-        uint256 amountTokenMin,
-        uint256 amountETHMin,
-        address to,
-        uint256 deadline
-    ) external returns (uint256 amountToken, uint256 amountETH);
-
-    function removeLiquidityWithPermit(
-        address tokenA,
-        address tokenB,
-        uint256 liquidity,
-        uint256 amountAMin,
-        uint256 amountBMin,
-        address to,
-        uint256 deadline,
-        bool approveMax,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external returns (uint256 amountA, uint256 amountB);
-
-    function removeLiquidityETHWithPermit(
-        address token,
-        uint256 liquidity,
-        uint256 amountTokenMin,
-        uint256 amountETHMin,
-        address to,
-        uint256 deadline,
-        bool approveMax,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external returns (uint256 amountToken, uint256 amountETH);
-
-    // ═══════════════════════════════════════════
-    //                 SWAP
-    // ═══════════════════════════════════════════
-
-    /// @notice 指定输入数量，换取尽可能多的输出
-    function swapExactTokensForTokens(
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory amounts);
-
-    /// @notice 指定输出数量，花费尽可能少的输入
-    function swapTokensForExactTokens(
-        uint256 amountOut,
-        uint256 amountInMax,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory amounts);
-
-    /// @notice 用精确数量的 ETH 换 Token
-    function swapExactETHForTokens(
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external payable returns (uint256[] memory amounts);
-
-    /// @notice 用 Token 换精确数量的 ETH
-    function swapTokensForExactETH(
-        uint256 amountOut,
-        uint256 amountInMax,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory amounts);
-
-    /// @notice 用精确数量的 Token 换 ETH
-    function swapExactTokensForETH(
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory amounts);
-
-    /// @notice 用 ETH 换精确数量的 Token
-    function swapETHForExactTokens(
-        uint256 amountOut,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external payable returns (uint256[] memory amounts);
-
-    // ═══════════════════════════════════════════
-    //            PURE HELPERS
-    // ═══════════════════════════════════════════
-
-    /// @notice 根据比例计算等价数量
-    function quote(uint256 amountA, uint256 reserveA, uint256 reserveB)
-        external
-        pure
-        returns (uint256 amountB);
-
-    /// @notice 给定输入计算输出（含 0.3% 手续费）
-    function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
-        external
-        pure
-        returns (uint256 amountOut);
-
-    /// @notice 给定输出计算所需输入
-    function getAmountIn(uint256 amountOut, uint256 reserveIn, uint256 reserveOut)
-        external
-        pure
-        returns (uint256 amountIn);
-
-    /// @notice 沿路径计算每一跳的输出
-    function getAmountsOut(uint256 amountIn, address[] calldata path)
-        external
-        view
-        returns (uint256[] memory amounts);
-
-    /// @notice 沿路径计算每一跳的输入
-    function getAmountsIn(uint256 amountOut, address[] calldata path)
-        external
-        view
-        returns (uint256[] memory amounts);
-}
-```
 ---
 
 ### 2. 预言机模块
@@ -529,49 +240,7 @@ interface IRouter {
      ÷ (T1 - T0)                  ÷ (T2 - T1)
 ```
 
-**src/oracle/interfaces/IOracleSimple.sol**
-```solidity
-interface IOracleSimple {
-    // ═══════════════════════════════════════════
-    //                  EVENTS
-    // ═══════════════════════════════════════════
-    event OracleUpdated(uint256 price0Cumulative, uint256 price1Cumulative, uint32 blockTimestamp);
 
-    // ═══════════════════════════════════════════
-    //              READ FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 预言机绑定的 Pair
-    function pair() external view returns (address);
-
-    function token0() external view returns (address);
-    function token1() external view returns (address);
-
-    /// @notice TWAP 窗口期（秒），如 86400 = 24h
-    function PERIOD() external view returns (uint256);
-
-    /// @notice 上次更新时的累积价格快照
-    function price0CumulativeLast() external view returns (uint256);
-    function price1CumulativeLast() external view returns (uint256);
-
-    /// @notice 上次更新的时间戳
-    function blockTimestampLast() external view returns (uint32);
-
-    /// @notice 查询 TWAP 价格
-    /// @param token 输入代币地址（必须是 token0 或 token1）
-    /// @param amountIn 输入数量
-    /// @return amountOut 等价的输出数量
-    function consult(address token, uint256 amountIn) external view returns (uint256 amountOut);
-
-    // ═══════════════════════════════════════════
-    //             WRITE FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 更新 TWAP 快照，需间隔 >= PERIOD
-    /// @dev 任何人都可调用（Keeper 定期触发）
-    function update() external;
-}
-```
 #### 为什么用 TWAP 而不是现货价格？
 - 现货价格（瞬时）： 攻击者用闪电贷在 1 个区块内就能操纵 → 不安全
 - TWAP（24小时平均）： 攻击者必须持续 24 小时维持虚假价格 → 成本极高，几乎不可能
@@ -627,46 +296,7 @@ function isReady() external view returns (bool);
 |铸造权限|限制为授权的铸造者|
 |转账|无限制|
 
-**src/governance/interfaces/IGovToken.sol**
-```solidity
-interface IGovToken is IERC20 {
-    // ═══════════════════════════════════════════
-    //                  EVENTS
-    // ═══════════════════════════════════════════
-    event MinterUpdated(address indexed previousMinter, address indexed newMinter);
 
-    // ═══════════════════════════════════════════
-    //              READ FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 代币名称
-    function name() external view returns (string memory);
-
-    /// @notice 代币符号
-    function symbol() external view returns (string memory);
-
-    /// @notice 精度（18）
-    function decimals() external view returns (uint8);
-
-    /// @notice 当前有权铸造的地址（通常是 LiquidityGauge 或 Minter 合约）
-    function minter() external view returns (address);
-
-    /// @notice 最大供应量上限
-    function MAX_SUPPLY() external view returns (uint256);
-
-    // ═══════════════════════════════════════════
-    //             WRITE FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 铸造代币，仅 minter 可调用
-    /// @param to 接收地址
-    /// @param amount 铸造数量
-    function mint(address to, uint256 amount) external;
-
-    /// @notice 设置新的 minter 地址，仅 owner 可调用
-    function setMinter(address newMinter) external;
-}
-```
 #### VotingEscrow.sol
 **锁定 GOV 代币 1 周 – 4 年 → 获得 veGOV 投票权。**
 
@@ -690,86 +320,12 @@ interface IGovToken is IERC20 {
 |balanceOf(account)	|当前投票权（持续衰减中）|
 |totalSupply()	|veGOV 总供应量|
 
-**src/governance/interfaces/IVotingEscrow.sol**
-```solidity
-interface IVotingEscrow {
-    struct LockedBalance {
-        int128 amount;
-        uint256 end;
-    }
 
-    /// @notice 锁仓创建 ve 权重（msg.sender）
-    function createLock(uint256 value, uint256 lockDuration) external;
-
-    /// @notice 追加锁仓量
-    function increaseAmount(uint256 value) external;
-
-    /// @notice 延长锁定期
-    function increaseUnlockTime(uint256 newUnlockTime) external;
-
-    /// @notice 到期提取，清零 ve 权重
-    function withdraw() external;
-
-    /// @notice 当前投票权重（线性衰减）
-    function balanceOf(address addr) external view returns (uint256);
-
-    /// @notice 指定时间点的投票权重
-    function balanceOfAt(address addr, uint256 timestamp) external view returns (uint256);
-
-    /// @notice 全局总权重
-    function totalSupply() external view returns (uint256);
-
-    /// @notice 指定时间点的总权重
-    function totalSupplyAt(uint256 timestamp) external view returns (uint256);
-
-    /// @notice 查询锁仓信息
-    function locked(address addr) external view returns (LockedBalance memory);
-
-    event Deposit(address indexed provider, uint256 value, uint256 locktime, uint256 ts);
-    event Withdraw(address indexed provider, uint256 value, uint256 ts);
-}
-```
 ---
 ### 4. 激励模块
 
 #### GaugeController.sol
-**src/incentives/interfaces/IGaugeController.sol**
-```solidity
-interface IGaugeController {
-    /// @notice 注册新 gauge（仅 owner）
-    function addGauge(address gauge, int128 gaugeType, uint256 weight) external;
 
-    /// @notice 用 msg.sender 的 ve 余额投票
-    /// @param gauge 目标 gauge 地址
-    /// @param weight 分配权重（BPS，总和 ≤ 10000）
-    function voteForGaugeWeights(address gauge, uint256 weight) external;
-
-    /// @notice 推进 epoch，结算权重
-    function checkpoint() external;
-
-    /// @notice 对单个 gauge 做 checkpoint
-    function checkpointGauge(address gauge) external;
-
-    /// @notice 查询 gauge 归一化权重（1e18 = 100%）
-    function gaugeRelativeWeight(address gauge) external view returns (uint256);
-
-    /// @notice 查询指定时间的归一化权重
-    function gaugeRelativeWeight(address gauge, uint256 time) external view returns (uint256);
-
-    /// @notice gauge 总数
-    function gaugeCount() external view returns (uint256);
-
-    /// @notice 用户上次投票时间
-    function lastUserVote(address user, address gauge) external view returns (uint256);
-
-    /// @notice 用户对某 gauge 的已分配权重
-    function voteUserSlopes(address user, address gauge)
-        external view returns (uint256 slope, uint256 power, uint256 end);
-
-    event NewGauge(address indexed gauge, int128 gaugeType, uint256 weight);
-    event VoteForGauge(address indexed user, address indexed gauge, uint256 weight);
-}
-```
 
 **基于 veGOV 投票管理 Gauge 权重。**
 每周流程：
@@ -780,78 +336,7 @@ interface IGaugeController {
      gauge 排放 = 每周总排放 × gauge 相对权重
 
 #### LiquidityGauge.sol
-**src/incentives/interfaces/ILiquidityGauge.sol**
-```solidity
-interface ILiquidityGauge {
-    // ═══════════════════════════════════════════
-    //                  EVENTS
-    // ═══════════════════════════════════════════
-    event Deposit(address indexed user, uint256 amount);
-    event Withdraw(address indexed user, uint256 amount);
-    event RewardClaimed(address indexed user, uint256 amount);
-    event RewardNotified(uint256 amount, uint256 epoch);
 
-    // ═══════════════════════════════════════════
-    //              READ FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 该 Gauge 对应的 LP token（即 Pair 地址）
-    function stakingToken() external view returns (address);
-
-    /// @notice 奖励代币（GovToken）
-    function rewardToken() external view returns (address);
-
-    /// @notice GaugeController 地址
-    function controller() external view returns (address);
-
-    /// @notice 该 Gauge 内的 LP 总质押量
-    function totalSupply() external view returns (uint256);
-
-    /// @notice 某用户的质押余额
-    function balanceOf(address account) external view returns (uint256);
-
-    /// @notice 每单位质押 LP 累积的奖励（精度 1e18）
-    function rewardPerTokenStored() external view returns (uint256);
-
-    /// @notice 实时计算的 rewardPerToken
-    function rewardPerToken() external view returns (uint256);
-
-    /// @notice 某用户当前可领取的奖励数量
-    function earned(address account) external view returns (uint256);
-
-    /// @notice 当前 epoch 的奖励发放速率（token/sec）
-    function rewardRate() external view returns (uint256);
-
-    /// @notice 当前奖励周期结束时间
-    function periodFinish() external view returns (uint256);
-
-    // ═══════════════════════════════════════════
-    //             WRITE FUNCTIONS
-    // ═══════════════════════════════════════════
-
-    /// @notice 质押 LP token
-    /// @param amount 质押数量
-    function deposit(uint256 amount) external;
-
-    /// @notice 质押并代为指定接收者（用于 Router 集成）
-    function depositFor(address account, uint256 amount) external;
-
-    /// @notice 取回质押的 LP token
-    /// @param amount 取回数量
-    function withdraw(uint256 amount) external;
-
-    /// @notice 领取累积的奖励
-    /// @return reward 领取的奖励数量
-    function getReward() external returns (uint256 reward);
-
-    /// @notice 取回全部质押 + 领取奖励
-    function exit() external;
-
-    /// @notice 由 Controller/Minter 调用，通知本 epoch 分配到的奖励总量
-    /// @param amount 本期奖励总量
-    function notifyRewardAmount(uint256 amount) external;
-}
-```
 
 **LP 代币质押合约，带有流式奖励分发。**
 |函数	|描述|
@@ -863,34 +348,7 @@ interface ILiquidityGauge {
 **奖励数学模型**： 基于 Synthetix StakingRewards 模式，按秒累计奖励。
 
 #### FeeDistributor.sol
-**src/incentives/interfaces/IFeeDistributor.sol**
-```solidity
-interface IFeeDistributor {
-    /// @notice 记录本期手续费到当前 epoch
-    function checkpointToken() external;
 
-    /// @notice 快照 ve 总供应量
-    function checkpointTotalSupply() external;
-
-    /// @notice 按地址领取手续费分红
-    function claim(address addr) external returns (uint256);
-
-    /// @notice 批量领取
-    function claimMany(address[] calldata addrs) external returns (uint256[] memory);
-
-    /// @notice 查询可领数量
-    function claimable(address addr) external view returns (uint256);
-
-    /// @notice 开始分配的时间戳
-    function startTime() external view returns (uint256);
-
-    /// @notice 关联的 VotingEscrow 合约
-    function votingEscrow() external view returns (address);
-
-    event Claimed(address indexed recipient, uint256 amount, uint256 epoch);
-    event TokenCheckpointed(uint256 amount, uint256 epoch);
-}
-```
 
 **按比例将协议交易手续费分配给 veGOV 持有者。**
 
