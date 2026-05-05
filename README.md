@@ -58,6 +58,7 @@ VeToken DEX 是一个全栈 DeFi 协议，整合了以下组件：
 ```
 ---
 ## 系统架构
+```text
 
                        ┌──────────────┐
                        │   前端界面    │
@@ -81,10 +82,14 @@ VeToken DEX 是一个全栈 DeFi 协议，整合了以下组件：
     │   GovToken   │─────▶│  VotingEscrow  │─────▶│GaugeController │
     └──────────────┘      │    (veGOV)     │      └───────┬────────┘
                           └───────┬────────┘              │
-                                  │               ┌───────▼────────┐
-                          ┌───────▼────────┐      │ LiquidityGauge │
-                          │ FeeDistributor │      │  (每个池一个)    │
-                          └────────────────┘      └────────────────┘
+                                  │                  ┌────▼─────────┐
+                          ┌───────▼─┴──────┐         │LiquidityGauge│
+                          │ FeeDistributor │         │ (每个池一个)   │
+                          └───────────────┘          └──────┬───────┘
+                                                            │
+                              读取 ve 余额计算 Boost ◀────────┘
+                              (VotingEscrow.balanceOf/totalSupply)
+```
                 
 ---
 ## 合约结构
@@ -110,7 +115,7 @@ src/
 │       └── IVotingEscrow.sol
 ├── incentives/
 │   ├── GaugeController.sol         # Gauge 权重投票 & 排放路由
-│   ├── LiquidityGauge.sol          # 质押 + 奖励分发
+│   ├── LiquidityGauge.sol          # 质押 + Boost 奖励分发（依赖 VotingEscrow）
 │   ├── FeeDistributor.sol          # 协议手续费 -> veToken 持有者
 │   └── interfaces/
 │       ├── IGaugeController.sol
@@ -337,15 +342,81 @@ function isReady() external view returns (bool);
 
 #### LiquidityGauge.sol
 
+**LP 代币质押合约，带有 Boost 收益增强 + 流式奖励分发。**
 
-**LP 代币质押合约，带有流式奖励分发。**
-|函数	|描述|
-|------|-----|
-|deposit(amount)	|质押 LP 代币|
-|withdraw(amount)	|取消质押 LP 代币|
-|claim()	|领取累积的 GOV 奖励|
-|notifyRewardAmount(amount)	|管理员：注入新一轮奖励|
-**奖励数学模型**： 基于 Synthetix StakingRewards 模式，按秒累计奖励。
+##### 核心机制：Boost Multiplier（收益增强乘数）
+
+让"既提供流动性、又锁仓 GOV 的用户"获得**最高 2.5 倍**奖励，激励长期对齐。
+
+**Boost 公式：**
+
+```text
+working_balance = min(0.4 × balance + 0.6 × balance × (veUser / veTotal),balance)
+
+boost = working_balance ÷ (0.4 × balance)
+```
+
+| 用户状态           | working_balance     | Boost 倍数      |
+| ------------------ | ------------------- | --------------- |
+| 无 ve 锁仓         | 0.4 × balance       | **1.0x**（基础）|
+| 部分 ve 锁仓       | 0.4 ~ 1.0 × balance | 1.0x ~ 2.5x     |
+| ve 充足（封顶）    | 1.0 × balance       | **2.5x**（最大）|
+
+**奖励分配：**
+
+```text
+用户份额 = workingBalanceOf[user] / workingSupply
+```
+
+> 使用 working balance。
+
+##### 函数列表
+
+| 函数 | 描述 |
+|------|------|
+| `deposit(amount)` | 质押 LP 代币（自动刷新 working balance）|
+| `withdraw(amount)` | 取消质押（自动刷新 working balance）|
+| `getReward()` | 领取累积的 GOV 奖励 |
+| `exit()` | withdraw 全部 + getReward |
+| `kick(user)` | **任何人**可调用，刷新目标用户的 Boost（用于 ve 衰减后纠正）|
+| `notifyRewardAmount(amount)` | 仅 GaugeController 调用，注入新一轮奖励 |
+| `balanceOf(user)` | 用户原始质押量 |
+| `workingBalanceOf(user)` | Boost 后的有效质押量 |
+| `workingSupply()` | 全局有效质押总量 |
+| `boostOf(user)` | 用户当前 Boost 倍数（view 查询）|
+| `earned(user)` | 待领取奖励 |
+
+##### kick() 的意义
+
+ve 余额随时间线性衰减。如果用户不主动操作，其 working balance 不会自动下降，会继续享受过高的 Boost 比例。`kick(user)` 允许**任何人**触发刷新——重新读取目标用户的 ve 余额，重新计算 working balance，从而让其他 LP 分到应得的份额。
+
+> kick 只是"按链上真实状态重算"，不是惩罚机制；如果用户 ve 没有衰减，kick 不会改变结果。
+
+##### 依赖关系
+
+| 依赖合约 | 调用的函数 | 用途 |
+|----------|------------|------|
+| `VotingEscrow` | `balanceOf(user)` | 计算 Boost 时读用户 ve |
+| `VotingEscrow` | `totalSupply()` | 计算 Boost 时读全局 ve |
+| `GaugeController` | — | 接收 `notifyRewardAmount` |
+| `GovToken` (ERC-20) | `transfer` | 发放奖励 |
+| `LP Token` (ERC-20) | `transferFrom` | 接收质押 |
+
+##### 用户操作流程
+
+```text
+1. approve(gauge, amount) → deposit(amount)
+   └─→ 内部调用 _updateWorkingBalance(user)
+       ├─→ 读 VotingEscrow.balanceOf(user)
+       ├─→ 读 VotingEscrow.totalSupply()
+       └─→ 写入 workingBalanceOf[user] / workingSupply
+
+2. 持续累积奖励（按 workingBalance 份额）
+
+3. getReward() 或 exit() 领取
+
+4. 任何人可调用 kick(user) 刷新衰减后的 Boost
+```
 
 #### FeeDistributor.sol
 
@@ -394,6 +465,8 @@ function isReady() external view returns (bool);
 |I-5	|Oracle	|price0Average × price1Average ≈ 2^224（互为倒数）	|数学恒等式|
 |I-6	|Gauge	|∑ 已领取奖励 ≤ 总通知奖励	|奖励会计逻辑|
 |I-7	|Router	|输出金额在外部调用之前计算完毕	|CEI 模式|
+|I-8    |Gauge  |workingBalanceOf(user) ≤ balanceOf(user)（永远不超过原始余额）|Boost 公式 min() 强制|
+|I-9    |Gauge  |∑ workingBalanceOf(user) = workingSupply |状态同步逻辑|
 ---
 
 ## 快速开始
@@ -473,7 +546,7 @@ INITIAL_MINT=100000000e18            # 初始铸造 1 亿
 步骤 10 → FeeDistributor(rewardToken, votingEscrow)
 步骤 11 → PairFactory.setFeeTo(feeDistributor)
 步骤 12 → GaugeController(votingEscrow)
-步骤 13 → LiquidityGauge(lpToken, govToken, gaugeController)
+步骤 13 → LiquidityGauge(lpToken, govToken, gaugeController, votingEscrow)
 步骤 14 → GaugeController.addGauge(liquidityGauge, gaugeType, weight)
 
 阶段 5：激活
@@ -529,6 +602,9 @@ forge script script/Deploy.s.sol:Deploy \
 |最小锁定期限	|1 周	|不可变	|VotingEscrow.sol|
 |奖励周期	|7 天	|可配置	|LiquidityGauge.sol|
 |最小流动性	|1000 wei	|硬编码	|Pair.sol|
+|Boost 基础系数 |0.4（40%）|不可变 |LiquidityGauge.sol|
+|Boost 最大倍数 |2.5x（1/0.4）|由公式决定 |LiquidityGauge.sol|
+|kick 冷却   |无   |任何人可随时调用   |LiquidityGauge.sol|
 
 ### 前端推荐参数
 
@@ -578,7 +654,7 @@ open coverage/index.html
 |Oracle	|≥ 90%	|PERIOD 强制执行、溢出处理、未初始化状态|
 |VotingEscrow	|≥ 95%	|锁定/解锁时间逻辑、衰减计算、溢出|
 |GaugeController	|≥ 90%	|投票权重计算、epoch 转换|
-|LiquidityGauge	|≥ 95%	|奖励累积、存取款时序|
+|LiquidityGauge |≥ 95%  |奖励累积、存取款时序、Boost 计算、kick 刷新|
 |FeeDistributor	|≥ 90%	|领取计算、epoch 处理|
 
 ### 关键测试场景
@@ -611,6 +687,17 @@ open coverage/index.html
 - Pair k 值永不减少（模糊测试）
 - VotingEscrow 总供应量一致性（模糊测试）
 - Gauge 总分发 ≤ 总通知金额（模糊测试）
+
+**Boost 测试：**
+- 无 ve 用户的 boost 恒等于 1.0x
+- ve 充足用户 deposit 后 boost = 2.5x
+- 部分 ve 用户 boost 在 (1.0, 2.5) 区间内
+- ve 衰减后，未触发 kick 时 working balance 不变
+- 调用 kick() 后 working balance 正确下降
+- workingBalanceOf 始终 ≤ balanceOf（不变量 I-8）
+- ∑ workingBalanceOf = workingSupply（不变量 I-9）
+- deposit / withdraw 均触发 working balance 刷新
+- 两个 LP 数量相同、ve 不同的用户，奖励分配比例 = boost 比例
 ---
 
 ## Gas 基准
@@ -624,7 +711,8 @@ open coverage/index.html
 |OracleSimple.update	|~35,000	|3 次 SSTORE|
 |OracleSimple.consult	|~5,000	|View 调用|
 |VotingEscrow.createLock	|~200,000	|新建锁仓|
-|LiquidityGauge.deposit	|~120,000	|含奖励更新|
+|LiquidityGauge.deposit |~165,000       |含奖励更新 + Boost 重算（读 ve 两次）|
+|LiquidityGauge.kick    |~55,000        |仅刷新 Boost，不涉及代币转账|
 |LiquidityGauge.claim	|~80,000	|领取奖励|
 |GaugeController.vote	|~100,000	|—|
 ---
