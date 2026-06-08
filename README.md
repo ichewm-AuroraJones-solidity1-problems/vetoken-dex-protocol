@@ -1,8 +1,8 @@
-# VeToken DEX Staking Module
+# ERC20 Staking Rewards
 
-> 本 README 描述 VeToken DEX Protocol 中的 `StakingPool` 模块。
-> 本模块负责 LP Token / ERC-20 staking token 的质押、GOV / ERC-20 reward token 的奖励累计、领取、暂停和紧急退出。
-> 当前交付范围只包含 staking 主体逻辑，不包含 AMM、Router、TWAP、veToken 投票、Gauge 权重治理、手续费分红或协议排放策略设计。
+> 本 README 描述一个独立的 ERC-20 staking rewards 项目。
+> 本项目负责 ERC-20 staking token 的质押、ERC-20 reward token 的奖励累计、领取、暂停和紧急退出。
+> 当前交付范围只包含 staking 主体逻辑，不包含交易、做市、预言机、治理投票、手续费分红或复杂代币经济模型。
 
 [![Solidity](https://img.shields.io/badge/Solidity-^0.8.20-blue)](https://soliditylang.org/)
 [![Foundry](https://img.shields.io/badge/Built%20with-Foundry-FFDB1C.svg)](https://getfoundry.sh/)
@@ -30,14 +30,14 @@
 
 ## 模块说明
 
-`StakingPool` 是 VeToken DEX Protocol 中的质押奖励主体模块。用户将指定的 ERC-20 `stakingToken` 存入合约后，根据质押数量和质押时间获得 ERC-20 `rewardToken` 奖励。
+`StakingPool` 是本项目的质押奖励主体合约。用户将指定的 ERC-20 `stakingToken` 存入合约后，根据质押数量和质押时间获得 ERC-20 `rewardToken` 奖励。
 
-在 VeToken DEX Protocol 中：
+本项目采用单池 staking 设计：
 
-- `stakingToken` 通常是 AMM Pair 产生的 LP Token。
-- `rewardToken` 通常是协议治理代币 GOV。
-- 奖励资金由上游奖励管理或排放模块注入，本模块只负责接收奖励、记录奖励会计和向用户发放奖励。
-- Gauge 权重投票、veToken 投票权和 epoch 排放分配由其他模块负责，本模块只实现单个 staking 池子的主体逻辑。
+- `stakingToken` 是用户质押的标准 ERC-20 token。
+- `rewardToken` 是用户领取的标准 ERC-20 reward token。
+- 奖励资金由 `rewardManager` 注入，本项目负责接收奖励、记录奖励会计和向用户发放奖励。
+- 本项目不实现多池权重分配、投票治理、收益聚合或外部协议集成。
 
 本模块的开发重点是：
 
@@ -55,8 +55,8 @@
 
 ### 当前交付范围
 
-- ERC-20 `stakingToken` 的存入、提款和余额会计；在协议中通常对应 LP Token。
-- ERC-20 `rewardToken` 的奖励累计、领取和奖励余额检查；在协议中通常对应 GOV。
+- ERC-20 `stakingToken` 的存入、提款和余额会计。
+- ERC-20 `rewardToken` 的奖励累计、领取和奖励余额检查。
 - 普通质押池：用户可随时质押、提款和领取奖励。
 - 奖励周期配置：`rewardRate`、`periodFinish`、`rewardsDuration`。
 - 基础权限管理：`owner`、`rewardManager` 和 `guardian`。
@@ -68,16 +68,15 @@
 
 - 锁仓质押池：用户选择锁定周期，锁定期内不能普通提款。
 - `RewardVault`：奖励资金独立托管，并授权池子拉取奖励。
-- 与上游 `EmissionManager` 或奖励分发模块对接。
+- 可选的测试网部署和区块浏览器验证。
 - 基础 fuzz 测试和 Gas 报告。
-- 测试网部署和区块浏览器验证。
 
 ### 不在当前交付范围
 
 - 交易、做市、Router、swap、添加或移除流动性。
-- AMM Pair、LP Token 铸造和销毁。
-- Gauge 权重治理、veToken、投票权重和 epoch 排放投票。
-- TWAP、外部价格预言机、跨池价格计算。
+- 多池 staking factory、多池权重分配或跨池奖励调度。
+- 治理投票、投票权重和 epoch 排放投票。
+- TWAP、外部价格预言机或跨池价格计算。
 - 手续费收集、兑换、回购或分红。
 - 可升级代理、DAO 治理、复杂代币经济模型。
 - 支持 fee-on-transfer、rebasing、ERC777 callback 或非标准 ERC-20 token。
@@ -141,7 +140,7 @@ User
 ### 奖励配置
 
 ```text
-Reward Manager / Emission Module
+Reward Manager
   -> transfer rewardToken to StakingPool
   -> notifyRewardAmount(reward)
   -> rewardRate = reward / rewardsDuration
@@ -185,8 +184,8 @@ script/
 
 | 变量 | 说明 |
 |---|---|
-| `stakingToken` | 用户质押的 ERC-20 token，协议中通常为 LP Token |
-| `rewardToken` | 用户领取的 ERC-20 reward token，协议中通常为 GOV |
+| `stakingToken` | 用户质押的 ERC-20 token |
+| `rewardToken` | 用户领取的 ERC-20 reward token |
 | `totalSupply` | 当前总质押数量 |
 | `balanceOf[user]` | 用户当前质押本金 |
 | `rewardRate` | 每秒释放的 rewardToken 数量 |
@@ -323,7 +322,7 @@ earned(user) =
 |---|---|
 | User | `stake`、`withdraw`、`claimReward`、`exit`、`emergencyWithdraw` |
 | Owner | 设置 reward manager、guardian、奖励周期、暂停和恢复 |
-| Reward Manager | 调用 `notifyRewardAmount` 配置奖励，可由上游排放模块或运维地址承担 |
+| Reward Manager | 调用 `notifyRewardAmount` 配置奖励 |
 | Guardian | 只允许暂停和恢复，不允许配置奖励或转移资金 |
 
 权限要求：
@@ -334,12 +333,12 @@ earned(user) =
 - `setRewardsDuration` 不应在当前奖励周期未结束时随意修改。
 - 所有关键权限操作需要 emit event。
 
-与 VeToken DEX 其他模块的边界：
+与其他系统的边界：
 
-- 本模块不创建 LP Token，只接收已经存在的 `stakingToken`。
-- 本模块不计算 Gauge 权重，只按已经注入的 rewardToken 发放奖励。
-- 本模块不读取 veToken 投票权，不实现 boost。
-- 本模块不负责协议手续费分红。
+- 本项目不创建 staking token，只接收已经存在的标准 ERC-20 `stakingToken`。
+- 本项目不铸造 reward token，只按已经注入的 `rewardToken` 发放奖励。
+- 本项目不实现投票权、boost 或多池权重分配。
+- 本项目不负责手续费分红、回购或收益聚合。
 
 ---
 
@@ -480,7 +479,7 @@ REWARDS_DURATION=
 
 ### 部署顺序
 
-1. 确认 `stakingToken` 和 `rewardToken` 地址；在协议中通常为 LP Token 和 GOV。
+1. 确认 `stakingToken` 和 `rewardToken` 地址。
 2. 部署 `StakingPool`。
 3. 设置 `rewardManager`。
 4. 设置 `guardian`。
@@ -504,7 +503,7 @@ forge script script/Deploy.s.sol \
 
 ### 功能验收
 
-- 用户可以质押标准 ERC-20；在协议中通常为 LP Token。
+- 用户可以质押标准 ERC-20。
 - 用户可以提取部分或全部本金。
 - 用户可以领取已累积奖励。
 - `exit()` 可以一次性完成提款和领奖。
