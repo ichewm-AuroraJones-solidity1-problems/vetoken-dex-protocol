@@ -1,8 +1,8 @@
 # VeToken DEX Staking Module
 
-> 本 README 描述 VeToken DEX Protocol 项目中由我负责的 staking 主体部分。
-> 本模块负责 LP Token / ERC-20 staking token 的质押、GOV / ERC-20 reward token 的奖励累计与领取、暂停和紧急退出。
-> 本模块只实现 staking 主体逻辑，不负责 AMM、Router、TWAP、veToken 投票、Gauge 权重治理、手续费分红或协议排放策略设计。
+> 本 README 描述 VeToken DEX Protocol 中的 `StakingPool` 模块。
+> 本模块负责 LP Token / ERC-20 staking token 的质押、GOV / ERC-20 reward token 的奖励累计、领取、暂停和紧急退出。
+> 当前交付范围只包含 staking 主体逻辑，不包含 AMM、Router、TWAP、veToken 投票、Gauge 权重治理、手续费分红或协议排放策略设计。
 
 [![Solidity](https://img.shields.io/badge/Solidity-^0.8.20-blue)](https://soliditylang.org/)
 [![Foundry](https://img.shields.io/badge/Built%20with-Foundry-FFDB1C.svg)](https://getfoundry.sh/)
@@ -13,7 +13,7 @@
 ## 目录
 
 - [模块说明](#模块说明)
-- [负责范围](#负责范围)
+- [交付范围](#交付范围)
 - [用户流程](#用户流程)
 - [合约结构](#合约结构)
 - [核心合约](#核心合约)
@@ -51,9 +51,9 @@
 
 ---
 
-## 负责范围
+## 交付范围
 
-### 本次负责范围
+### 当前交付范围
 
 - ERC-20 `stakingToken` 的存入、提款和余额会计；在协议中通常对应 LP Token。
 - ERC-20 `rewardToken` 的奖励累计、领取和奖励余额检查；在协议中通常对应 GOV。
@@ -64,7 +64,7 @@
 - 紧急退出：`emergencyWithdraw` 允许用户取回本金并放弃未领取奖励。
 - Foundry 单元测试、集成测试和本地部署脚本。
 
-### 协作或后续范围
+### 后续扩展范围
 
 - 锁仓质押池：用户选择锁定周期，锁定期内不能普通提款。
 - `RewardVault`：奖励资金独立托管，并授权池子拉取奖励。
@@ -72,7 +72,7 @@
 - 基础 fuzz 测试和 Gas 报告。
 - 测试网部署和区块浏览器验证。
 
-### 不负责范围
+### 不在当前交付范围
 
 - 交易、做市、Router、swap、添加或移除流动性。
 - AMM Pair、LP Token 铸造和销毁。
