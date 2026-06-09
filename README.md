@@ -275,7 +275,7 @@ script/
 
 ## 奖励计算
 
-本模块使用常见的 `rewardPerToken` 模型。
+本项目使用常见的 `rewardPerToken` 模型。
 
 ```text
 lastTimeRewardApplicable =
@@ -352,7 +352,7 @@ earned(user) =
 
 所有 ERC-20 转账使用 OpenZeppelin `SafeERC20`。
 
-本模块只支持标准 ERC-20，不支持：
+本项目只支持标准 ERC-20，不支持：
 
 - fee-on-transfer token
 - rebasing token
