@@ -106,6 +106,15 @@ function setOwnerLockdown(bool locked, bytes32 reasonHash) external onlyOwner
 | owner 暂停任何模块 | guardian 不能恢复 |
 | owner 关闭 lockdown | guardian 只恢复自己暂停且仍满足规则的模块 |
 
+重复 pause/unpause 规则：
+
+- `pauseModule(module, reasonHash)` 只能从未暂停状态切换到暂停状态。
+- 对已经 paused 的 module 再调用 `pauseModule` 必须 revert `ModuleAlreadyPaused(module)`，不得 no-op，也不得覆盖 `operator/byGuardian/reasonHash`。
+- guardian 暂停后，owner 再 pause 同一 module 必须 revert `ModuleAlreadyPaused(module)`；owner 若要接管恢复流程，应直接调用 `unpauseModule(module)`，必要时再重新 `pauseModule(module, reasonHash)`。
+- owner 暂停后，guardian 再 pause 同一 module 必须 revert `ModuleAlreadyPaused(module)`，不能把 owner 暂停降级成 guardian 暂停。
+- `unpauseModule(module)` 只能从暂停状态切回未暂停状态；未暂停时调用必须 revert `ModuleNotPaused(module)`。
+- 成功 `unpauseModule` 后必须清除该 module 的 `operator` 和 `byGuardian` 记录，避免旧暂停者影响下一次 pause。
+
 ### 资金接收 Allowlist
 
 所有会把资产转出到治理地址的函数必须使用接收地址 allowlist，避免 owner 误把资金扫到错误地址。
@@ -233,10 +242,13 @@ MAX_REWARD_RATE = type(uint128).max
 4. 校验 `stakingToken() != rewardToken()`。
 5. 校验初始奖励状态为未开启：`periodFinish == 0`、`rewardRate == 0`、`lastUpdateTime == 0`、`rewardPerTokenStored == 0`。
 6. 校验资金会计为空：`totalSupply == 0`、`scheduledRewards == 0`、`accruedRewardReserve == 0`、`aggregateClaimableRewards == 0`、`unallocatedRewards == 0`、`accountedRewardBalance == 0`。
-7. 如果 `initialOwner` 临时设置为部署者 EOA，部署交易后必须立即调用 `transferOwnership(multisigOrTimelock)`，并由目标地址 `acceptOwnership()`。
-8. 部署者 EOA 完成交接后不得保留 owner、rewardManager 或 guardian 权限。
-9. `rewardManager` 给 staking 合约授权最小验证额度的 `rewardToken`，执行一次 `fundAndNotify` 检查奖励注入路径。
-10. 验证账户执行 `stake -> getReward -> exit`，确认本金和奖励路径正常。
+7. 校验 `ownerLockdown() == false`，`pausedModule(MODULE_STAKE) == false`，`pausedModule(MODULE_REWARD_FUNDING) == false`。
+8. owner 必须调用 `setSweepRecipientAllowed(treasury, true)`、`setSweepRecipientAllowed(rewardManager, true)` 和 `setSweepRecipientAllowed(recoveryRecipient, true)`，除非其中某个地址明确不承担资金接收职责。
+9. 校验 `sweepRecipientAllowed(treasury) == true`、`sweepRecipientAllowed(rewardManager) == true`、`sweepRecipientAllowed(recoveryRecipient) == true`；未被 allowlist 的地址不得作为 `sweepUnallocatedRewards/recoverExcessStakingToken/recoverERC20` 的 `to`。
+10. 如果 `initialOwner` 临时设置为部署者 EOA，部署交易后必须立即调用 `transferOwnership(multisigOrTimelock)`，并由目标地址 `acceptOwnership()`。
+11. 部署者 EOA 完成交接后不得保留 owner、rewardManager 或 guardian 权限。
+12. `rewardManager` 给 staking 合约授权最小验证额度的 `rewardToken`，执行一次 `fundAndNotify` 检查奖励注入路径。
+13. 验证账户执行 `stake -> getReward -> exit`，确认本金和奖励路径正常。
 
 部署后校验必须记录到部署报告中，至少包含合约地址、构造参数、角色地址、初始状态查询结果和 ownership 交接交易哈希。
 
@@ -268,6 +280,7 @@ MAX_REWARD_RATE = type(uint128).max
 | `aggregateClaimableRewards()` | `0` |
 | `unallocatedRewards()` | `0` |
 | `accountedRewardBalance()` | `0` |
+| `ownerLockdown()` | `false` |
 | `pausedModule(MODULE_STAKE)` | `false` |
 | `pausedModule(MODULE_REWARD_FUNDING)` | `false` |
 
@@ -290,8 +303,8 @@ MAX_REWARD_RATE = type(uint128).max
 | `setGuardian(address newGuardian)` | owner | 允许零地址 | 更新 `guardian` | `GuardianUpdated` | OZ `OwnableUnauthorizedAccount` |
 | `setOwnerLockdown(bool locked, bytes32 reasonHash)` | owner | 无 | 更新 `ownerLockdown` | `OwnerLockdownUpdated` | OZ `OwnableUnauthorizedAccount` |
 | `setSweepRecipientAllowed(address recipient, bool allowed)` | owner | `recipient != address(0)` | 更新 `sweepRecipientAllowed[recipient]` | `SweepRecipientUpdated` | OZ `OwnableUnauthorizedAccount`、`ZeroAddress` |
-| `pauseModule(bytes32 module, bytes32 reasonHash)` | owner or guardian | module 必须是合法模块；guardian 只能暂停允许模块 | 标记模块暂停，记录暂停操作者类型 | `ModulePaused` | `OnlyGuardianOrOwner`、`InvalidModule`、`GuardianNotAllowed` |
-| `unpauseModule(bytes32 module)` | owner or guardian | module 必须是合法模块；owner 可恢复；guardian 只能恢复自己暂停且未 owner lockdown 的模块 | 清除模块暂停 | `ModuleUnpaused` | `OnlyGuardianOrOwner`、`InvalidModule`、`OwnerLockdownActive`、`GuardianCannotUnpause` |
+| `pauseModule(bytes32 module, bytes32 reasonHash)` | owner or guardian | module 必须是合法且未暂停模块；guardian 只能暂停允许模块 | 标记模块暂停，记录暂停操作者类型 | `ModulePaused` | `OnlyGuardianOrOwner`、`InvalidModule`、`ModuleAlreadyPaused`、`GuardianNotAllowed` |
+| `unpauseModule(bytes32 module)` | owner or guardian | module 必须是合法且已暂停模块；owner 可恢复；guardian 只能恢复自己暂停且未 owner lockdown 的模块 | 清除模块暂停 | `ModuleUnpaused` | `OnlyGuardianOrOwner`、`InvalidModule`、`ModuleNotPaused`、`OwnerLockdownActive`、`GuardianCannotUnpause` |
 | `syncUnallocatedRewards()` | anyone | `rewardToken.balanceOf(this) > accountedRewardBalance` | 将未入账余额计入 `unallocatedRewards` 和 `accountedRewardBalance` | `UnallocatedRewardsSynced` | `NoUnaccountedRewards` |
 | `sweepUnallocatedRewards(address to, uint256 amount)` | owner | `to != address(0)` 且已允许，`amount > 0`，`amount <= sweepableUnallocatedRewards()` | 先 checkpoint 全局奖励；减少 `unallocatedRewards` 和 `accountedRewardBalance`；转出 rewardToken | `UnallocatedRewardsSwept`，可能 `RewardsForfeited` | OZ `OwnableUnauthorizedAccount`、`ZeroAddress`、`ZeroAmount`、`InvalidSweepRecipient`、`InsufficientUnallocatedRewards` |
 | `recoverExcessStakingToken(address to, uint256 amount)` | owner | `to != address(0)` 且已允许，`amount > 0`，`amount <= stakingToken.balanceOf(this) - totalSupply` | 转出误转的超额 stakingToken，不改变用户本金会计 | `ExcessStakingTokenRecovered` | OZ `OwnableUnauthorizedAccount`、`ZeroAddress`、`ZeroAmount`、`InvalidSweepRecipient`、`InsufficientExcessStakingToken` |
@@ -307,7 +320,7 @@ MAX_REWARD_RATE = type(uint128).max
 | `rewardPerToken()` | 当前全局累计每单位质押奖励，`totalSupply == 0` 时返回 `rewardPerTokenStored` |
 | `earned(address user)` | 用户当前可领取奖励，包含已结算 `rewards[user]` 和实时新增部分 |
 | `storedUnallocatedRewards()` | 当前存储中的 `unallocatedRewards`，不模拟 checkpoint，必须等于状态变量 `unallocatedRewards` |
-| `sweepableUnallocatedRewards()` | 如果现在调用 `sweepUnallocatedRewards`，理论上可 sweep 的金额；必须模拟空池 pending forfeited reward |
+| `sweepableUnallocatedRewards()` | 如果现在调用 `sweepUnallocatedRewards`，理论上可 sweep 的金额；必须模拟 checkpoint 会新增的 pending unallocated reward |
 | `unreservedRewardBalance()` | 当前尚未进入内部会计分类的 rewardToken 余额；正常情况下应为 0，误转后可通过 `syncUnallocatedRewards` 归类 |
 | `isRewardPeriodActive()` | `block.timestamp < periodFinish` |
 | `pausedModule(bytes32 module)` | 指定模块是否暂停 |
@@ -333,6 +346,8 @@ error InvalidReceivedAmount(uint256 expected, uint256 received);
 error InsufficientRewardBalance(uint256 required, uint256 available);
 error InsufficientStake(uint256 requested, uint256 available);
 error ModuleIsPaused(bytes32 module);
+error ModuleAlreadyPaused(bytes32 module);
+error ModuleNotPaused(bytes32 module);
 error InvalidModule(bytes32 module);
 error GuardianNotAllowed(bytes32 module);
 error GuardianCannotUnpause(bytes32 module);
@@ -405,7 +420,7 @@ Guardian 被允许调用受限 `unpause` 是有意设计，不是权限泄漏。
 - 如果 owner 执行了 owner-level pause 或设置了 `ownerLockdown = true`，guardian 不能 unpause，必须由 owner 恢复。
 - Guardian 不能修改 `rewardManager`、`rewardsDuration`、owner、token 地址或任何资金接收地址。
 - Guardian 不能调用 `sweepUnallocatedRewards` 或任何资金提取函数。
-- 每次 pause/unpause 必须包含事件，事件中记录 `operator`、`module`、`reasonHash` 或等价字段。
+- 每次 pause/unpause 必须包含事件。`pauseModule` 事件必须记录 `operator`、`module` 和 `reasonHash`；`unpauseModule` 事件至少记录 `operator` 和 `module`，不强制要求 `reasonHash`。
 
 推荐暂停模块：
 
@@ -457,14 +472,14 @@ Paused 状态下管理员操作：
 
 ## 内部奖励资金会计
 
-本项目当前范围不实现独立 `RewardVault` 合约，但主合约必须实现等价的内部奖励资金账本。所有 rewardToken 余额都必须落入以下四类之一：
+本项目当前范围不实现独立 `RewardVault` 合约，但主合约必须实现等价的内部奖励资金账本。已经进入 `accountedRewardBalance` 的 rewardToken 必须精确落入四类内部会计之一；尚未进入会计的余额单独由 `unreservedRewardBalance` 表示，不属于这四类内部资金。
 
 | 类别 | 状态变量 | 是否可由用户领取 | 是否可 sweep | 说明 |
 |---|---|---:|---:|---|
 | 已结算未领取奖励 | `aggregateClaimableRewards` 和 `rewards[user]` | yes | no | 用户已经 earned 并 checkpoint 到个人账上 |
 | 已释放未逐户结算奖励 | `accruedRewardReserve` | 用户 checkpoint 后可领取 | no | 已进入全局 `rewardPerToken`，但尚未进入用户 `rewards[user]` |
 | 未来排程奖励 | `scheduledRewards` | 未来按时间释放 | no | 当前 reward period 剩余可释放奖励 |
-| 未分配奖励 | `unallocatedRewards` | no | yes，仅 owner | forfeited、rounding dust、donation、误转 |
+| 未分配奖励 | `unallocatedRewards` | no | yes，仅 owner | forfeited、rounding dust、donation、sync 后的误转 |
 | 未入账余额 | `rewardToken.balanceOf(this) - accountedRewardBalance` | no | no，需先 sync | 只能通过 `syncUnallocatedRewards` 进入 `unallocatedRewards` |
 
 核心等式：
@@ -486,7 +501,7 @@ accountedRewardBalance
 - 时间流逝且有用户质押时，奖励从 `scheduledRewards` 释放到全局 `rewardPerToken`；其中可由 `rewardPerTokenIncrement` 分配给用户的 `allocated` 进入 `accruedRewardReserve`，`released - allocated` 进入 `unallocatedRewards`；用户交互时再从 `accruedRewardReserve` 转入 `rewards[user]` 和 `aggregateClaimableRewards`。
 - 用户 `getReward/claimReward` 成功转账时，减少 `rewards[user]`、`aggregateClaimableRewards` 和 `accountedRewardBalance`。
 - 空池期间释放、整除 dust 和误转 sync 的资金进入 `unallocatedRewards`。
-- `sweepUnallocatedRewards` 成功转账时，减少 `unallocatedRewards` 和 `accountedRewardBalance`。
+- `sweepUnallocatedRewards` 会先执行 checkpoint；checkpoint 可能把已释放奖励从 `scheduledRewards` 扣到 `unallocatedRewards/accruedRewardReserve`。随后 sweep 转账本身只能减少 `unallocatedRewards` 和 `accountedRewardBalance`。
 
 任何时候都必须满足：
 
@@ -530,7 +545,7 @@ earned(user) =
 - 当 `totalSupply == 0` 且奖励周期正在进行时，时间仍然流逝。
 - 这段时间对应的奖励视为已经释放但无人获得。
 - 空池释放奖励不顺延，不补给第一个后进入用户，也不自动进入下一轮 `leftover`。
-- `_updateReward(address(0))` 或等价 checkpoint 必须把空池期间 `elapsed * rewardRate` 从 `scheduledRewards` 移入 `unallocatedRewards`，并发出 `RewardsForfeited(startTime, endTime, amount)`。
+- `_updateReward(address(0))` 或等价 checkpoint 必须把空池期间 `released = min(elapsed * rewardRate, scheduledRewards)` 从 `scheduledRewards` 移入 `unallocatedRewards`，并发出 `RewardsForfeited(startTime, endTime, amount)`。
 
 ## 会计更新顺序
 
@@ -556,8 +571,9 @@ modifier updateReward(address account) {
 | `withdraw` | 先 `_updateReward(msg.sender)`，再减少本金 |
 | `getReward/claimReward` | 先 `_updateReward(msg.sender)`，再支付奖励 |
 | `exit` | 读取本金后，withdraw 和 claim 路径都必须完成奖励更新 |
+| `emergencyExit` | 先 `_updateReward(msg.sender)`，再读取 forfeited reward、清零奖励和转出本金 |
 | `fundAndNotify` | 先 `_updateReward(address(0))`，再计算 `leftover` 和新 `rewardRate` |
-| `sweepUnallocatedRewards` | 先 `_updateReward(address(0))`，确保空池放弃奖励已入账 |
+| `sweepUnallocatedRewards` | 先 `_updateReward(address(0))`，确保 pending 空池 forfeited reward 和 pending `rptDust` 已入账 |
 
 `_updateGlobalReward()` 必须做这些事：
 
@@ -572,7 +588,7 @@ rptDust = released - allocated
 
 - 用 `rewardPerTokenIncrement` 更新 `rewardPerTokenStored`。
 - 只将 `allocated` 加入 `accruedRewardReserve`，因为只有这部分能通过 `earned()` 被用户领取。
-- 将 `rptDust` 加入 `unallocatedRewards`，并发出 `RewardPerTokenDust(rptDust)` 或在通用 dust 事件中记录。
+- 将 `rptDust` 加入 `unallocatedRewards`；当 `rptDust > 0` 时发出 `RewardPerTokenDust(rptDust)`。
 - 当 `totalSupply == 0` 时，不增加 `rewardPerTokenStored`，而是将 `released` 加入 `unallocatedRewards` 并发出 `RewardsForfeited`。
 - 将 `lastUpdateTime` 设置为 `lastTimeRewardApplicable()`。
 
@@ -694,7 +710,7 @@ periodFinish = block.timestamp + rewardsDuration
 - `to == address(0)` 必须 revert `ZeroAddress()`。
 - `to != address(0)` 但 `sweepRecipientAllowed[to] == false` 时必须 revert `InvalidSweepRecipient(to)`。
 - 若要让这笔资金重新成为奖励，必须先 sweep 到奖励资金管理地址，再通过 `fundAndNotify` 重新注入。
-- `sweepUnallocatedRewards` 只能减少 `unallocatedRewards`，不得减少 `scheduledRewards`、`aggregateClaimableRewards` 或任何用户的 `rewards[user]`。
+- `sweepUnallocatedRewards` 的前置 checkpoint 可以按 `_updateGlobalReward()` 规则减少 `scheduledRewards`；checkpoint 完成后的 sweep 转账只能减少 `unallocatedRewards` 和 `accountedRewardBalance`，不得额外减少 `scheduledRewards`、`aggregateClaimableRewards` 或任何用户的 `rewards[user]`。
 
 偿付边界：
 
@@ -719,22 +735,26 @@ storedUnallocatedRewards = unallocatedRewards
 `storedUnallocatedRewards()` 只返回当前存储值，不模拟任何 checkpoint。
 
 ```text
-pendingEmptyPoolForfeited =
+pendingReleased =
+  min((lastTimeRewardApplicable() - lastUpdateTime) * rewardRate, scheduledRewards)
+
+pendingCheckpointUnallocated =
   totalSupply == 0
-  ? (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate
-  : 0
+  ? pendingReleased
+  : pendingReleased - ((pendingReleased * 1e18 / totalSupply) * totalSupply / 1e18)
 
 sweepableUnallocatedRewards =
-  unallocatedRewards + pendingEmptyPoolForfeited
+  unallocatedRewards + pendingCheckpointUnallocated
 ```
 
-`sweepableUnallocatedRewards()` 是 view 层模拟值，用来回答“如果现在调用 `sweepUnallocatedRewards`，最多能 sweep 多少”。它可以大于当前存储的 `unallocatedRewards`，因为 `sweepUnallocatedRewards` 执行时会先 `_updateReward(address(0))`，把空池期间已经按时间释放但尚未 checkpoint 的奖励从 `scheduledRewards` 移入 `unallocatedRewards`。
+`sweepableUnallocatedRewards()` 是 view 层模拟值，用来回答“如果现在调用 `sweepUnallocatedRewards`，最多能 sweep 多少”。它可以大于当前存储的 `unallocatedRewards`，因为 `sweepUnallocatedRewards` 执行时会先 `_updateReward(address(0))`：空池时 pending released 全部进入 `unallocatedRewards`；有质押时 pending released 中无法通过 `rewardPerToken` 分配的 `rptDust` 进入 `unallocatedRewards`。
 
 约束：
 
 - 不再使用 `recoverableUnallocatedRewards()` 这个名字，避免混淆存储值和模拟值。
 - `storedUnallocatedRewards() <= sweepableUnallocatedRewards()` 必须成立。
-- 当 `totalSupply > 0` 或当前没有活跃奖励周期时，`sweepableUnallocatedRewards() == storedUnallocatedRewards()`。
+- 当没有 pending released，或 pending released 在当前 `totalSupply` 下不会产生 `rptDust` 时，`sweepableUnallocatedRewards() == storedUnallocatedRewards()`。
+- 当 `totalSupply > 0` 且距离上次 checkpoint 已经过一段时间时，`sweepableUnallocatedRewards()` 仍必须模拟 pending `rptDust`，不能简单等于 `storedUnallocatedRewards()`。
 - `sweepUnallocatedRewards(to, amount)` 的 `amount` 上限使用 checkpoint 后的 `unallocatedRewards`，等价于调用前 view 的 `sweepableUnallocatedRewards()`。
 
 ## 误转资产处理策略
@@ -871,6 +891,7 @@ event RewardPaid(address indexed user, uint256 amount);
 event EmergencyExit(address indexed user, uint256 principal, uint256 forfeitedReward);
 event RewardAdded(address indexed rewardManager, uint256 amount, uint256 rewardRate, uint256 periodFinish);
 event RewardsForfeited(uint256 indexed startTime, uint256 indexed endTime, uint256 amount);
+event RewardPerTokenDust(uint256 amount);
 event UnallocatedRewardsSwept(address indexed operator, address indexed to, uint256 amount, uint256 remainingUnallocated);
 event UnallocatedRewardsSynced(address indexed operator, uint256 amount, uint256 newUnallocated);
 event ExcessStakingTokenRecovered(address indexed operator, address indexed to, uint256 amount, uint256 remainingExcess);
@@ -903,9 +924,10 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 - `fundAndNotify` 必须发 `RewardAdded`。
 - `RewardAdded(rewardManager, amount, rewardRate, periodFinish)` 中的 `amount` 必须等于本次实际收到的 `received`，不是函数参数的盲目信任值，也不是 `received + leftover`。`leftover` 只影响新 `rewardRate`，不作为本次新增 amount 记录。
 - 空池奖励进入 `unallocatedRewards` 必须发 `RewardsForfeited`。
+- `rewardPerToken` 层整数除法产生 `rptDust > 0` 时必须发 `RewardPerTokenDust(rptDust)`；`rptDust == 0` 时不发。
 - `RewardsForfeited(startTime, endTime, amount)` 只用于描述某段空池时间释放但无人获得的奖励。用户 `emergencyExit()` 放弃奖励没有 `startTime/endTime` 语义，不得复用 `RewardsForfeited`，必须只通过 `EmergencyExit(user, principal, forfeitedReward)` 表达。
 - 任何角色变更必须发事件。
-- 任何 pause/unpause 必须发事件。
+- 任何 pause/unpause 必须发事件；`ModulePaused` 必须带 `reasonHash`，`ModuleUnpaused` 不带 `reasonHash`。
 
 ## 安全不变量
 
@@ -984,9 +1006,10 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 - 空池跨完整 reward period 后再质押，`earned(firstUser) == 0`，直到下一次有效奖励释放。
 - `sweepUnallocatedRewards` 只能由 owner 调用，只能转出 `unallocatedRewards`。
 - 空池奖励周期进行中且尚未 checkpoint 时，`storedUnallocatedRewards()` 只返回存储值，`sweepableUnallocatedRewards()` 必须包含 pending empty-pool forfeited reward。
-- `sweepUnallocatedRewards(to, amount)` 在 amount 等于调用前 `sweepableUnallocatedRewards()` 时应成功；执行后 pending forfeited reward 已进入事件和状态会计。
+- 有质押且奖励周期进行中但尚未 checkpoint 时，`sweepableUnallocatedRewards()` 必须包含 pending `rptDust`；若 pending released 能被 `rewardPerToken` 精确分配，则该项为 0。
+- `sweepUnallocatedRewards(to, amount)` 在 amount 等于调用前 `sweepableUnallocatedRewards()` 时应成功；执行后 pending unallocated reward 已进入事件和状态会计。
 - `sweepUnallocatedRewards`、`recoverExcessStakingToken`、`recoverERC20` 的接收地址必须在 `sweepRecipientAllowed` 中，否则 `InvalidSweepRecipient` revert。
-- sweep 不改变用户 `rewards[user]`、`aggregateClaimableRewards`、`scheduledRewards`。
+- sweep 转账本身不改变用户 `rewards[user]`、`aggregateClaimableRewards` 或 checkpoint 后的 `scheduledRewards`；但调用开始时的强制 checkpoint 可能先按时间释放规则减少 `scheduledRewards`。
 
 用户边界：
 
@@ -1017,6 +1040,10 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 
 - guardian 可暂停 `MODULE_STAKE` 和 `MODULE_REWARD_FUNDING`。
 - `WITHDRAW` 和 `CLAIM` 不是合法模块，传入 `pauseModule/unpauseModule/pausedModule` 必须 `InvalidModule` revert。
+- 已暂停 module 再次 `pauseModule` 必须 `ModuleAlreadyPaused` revert，不得覆盖原 `operator/byGuardian`。
+- 未暂停 module 调用 `unpauseModule` 必须 `ModuleNotPaused` revert。
+- guardian 暂停后 owner 再 pause 同一 module 必须 `ModuleAlreadyPaused` revert；owner 可以直接 unpause。
+- owner 暂停后 guardian 再 pause 同一 module 必须 `ModuleAlreadyPaused` revert，不能覆盖 owner 暂停来源。
 - guardian 只能恢复自己暂停的模块。
 - owner-level lockdown 后 guardian 不能 unpause。
 - owner-level lockdown 开启后不自动暂停模块，只阻止 guardian unpause；关闭后 guardian 只能恢复自己暂停的模块。
@@ -1055,12 +1082,12 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 | `setGuardian(newGuardian)` | `guardian` 更新为 newGuardian，零地址表示禁用，发 `GuardianUpdated(old,new)` | 非 owner 用 OZ owner error |
 | `setOwnerLockdown(locked, reasonHash)` | `ownerLockdown == locked`，发 `OwnerLockdownUpdated`；不自动改变任何 module pause 状态 | 非 owner 用 OZ owner error |
 | `setSweepRecipientAllowed(recipient, allowed)` | `sweepRecipientAllowed[recipient] == allowed`，发 `SweepRecipientUpdated` | 非 owner用 OZ owner error；零地址用 `ZeroAddress` |
-| `pauseModule(module, reasonHash)` | 合法 module 进入 paused；记录 operator 和 byGuardian；发 `ModulePaused` | 非 owner/guardian、非法 module、guardian 暂停不允许模块均 revert |
-| `unpauseModule(module)` | owner 可恢复合法 module；guardian 只能恢复自己暂停且无 lockdown 的 module；发 `ModuleUnpaused` | 非 owner/guardian、非法 module、owner lockdown、guardian 恢复非自己暂停模块均 revert |
+| `pauseModule(module, reasonHash)` | 合法且未暂停的 module 进入 paused；记录 operator 和 byGuardian；发 `ModulePaused` | 非 owner/guardian、非法 module、module 已暂停、guardian 暂停不允许模块均 revert |
+| `unpauseModule(module)` | owner 可恢复已暂停的合法 module；guardian 只能恢复自己暂停且无 lockdown 的 module；发 `ModuleUnpaused` | 非 owner/guardian、非法 module、module 未暂停、owner lockdown、guardian 恢复非自己暂停模块均 revert |
 | `syncUnallocatedRewards()` | 将 `rewardToken.balanceOf(this) - accountedRewardBalance` 加入 `unallocatedRewards` 和 `accountedRewardBalance`，发 `UnallocatedRewardsSynced` | 无未入账余额时 `NoUnaccountedRewards` revert |
 | `sweepUnallocatedRewards(to, amount)` | 先 checkpoint；允许 amount 最大为调用前 `sweepableUnallocatedRewards()`；只减少 checkpoint 后的 `unallocatedRewards` 和 `accountedRewardBalance`，用户本金和奖励不变，发 `UnallocatedRewardsSwept` | 非 owner、to 不允许、amount 为 0、amount 超过 checkpoint 后 `unallocatedRewards` 均 revert |
 | `recoverExcessStakingToken(to, amount)` | 只转出 `stakingToken.balanceOf(this) - totalSupply` 范围内的超额 stakingToken，发 `ExcessStakingTokenRecovered` | 非 owner、零地址、recipient 未允许、amount 为 0、amount 超额均 revert |
-| `recoverERC20(token, to, amount)` | 只能恢复非 staking/reward token，发 `ERC20Recovered` | token 是核心 token、to 不允许、转账失败均 revert |
+| `recoverERC20(token, to, amount)` | 只能恢复非 staking/reward token，发 `ERC20Recovered` | 非 owner、token 是核心 token、to 为零地址、to 未允许、amount 为 0、转账失败均 revert |
 
 奖励会计量化标准：
 
@@ -1080,7 +1107,7 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 部署验收：
 
 - 构造参数和所有初始 view 返回值与部署报告一致。
-- 部署后未开启奖励周期时，`earned(anyUser) == 0`、`rewardPerToken() == 0`、`lastTimeRewardApplicable() == 0`。
+- 部署后未开启奖励周期时，`earned(anyUser) == 0`、`rewardPerToken() == 0`、`lastTimeRewardApplicable() == 0`、`ownerLockdown() == false`。
 - owner 已完成 `Ownable2Step` 交接，部署者 EOA 不再拥有 owner、rewardManager、guardian。
 - 基础连通性检查 `fundAndNotify -> stake -> warp -> getReward -> exit` 通过，资金差额只允许整数 dust。
 
@@ -1110,9 +1137,11 @@ forge coverage
 部署后校验：
 
 - 查询所有构造参数 view，逐项匹配部署配置。
-- 查询初始状态：`periodFinish == 0`、`rewardRate == 0`、`totalSupply == 0`、`accountedRewardBalance == 0`。
+- 查询初始状态：`periodFinish == 0`、`rewardRate == 0`、`totalSupply == 0`、`accountedRewardBalance == 0`、`ownerLockdown() == false`。
 - 如果发生 ownership 交接，确认 `owner() == finalOwner` 且部署者 EOA 不再是 owner。
 - 确认部署者 EOA 不是 `rewardManager`，也不是 `guardian`，除非部署报告明确说明这是临时测试环境。
+- 确认 Treasury、rewardManager 和 recovery recipient 已按部署配置调用 `setSweepRecipientAllowed(..., true)`；如果某个地址不承担资金接收职责，部署报告必须明确记录跳过原因。
+- 查询 `sweepRecipientAllowed(treasury)`、`sweepRecipientAllowed(rewardManager)`、`sweepRecipientAllowed(recoveryRecipient)`，必须与部署配置一致。
 - 确认 `rewardManager` 已对 staking 合约完成 rewardToken allowance，或已经准备好通过资金管理合约调用。
 - 执行基础连通性 fork 测试，覆盖 `fundAndNotify`、`stake`、`getReward`、`exit`。
 - 执行一次 `pauseModule(MODULE_STAKE)` 和 `unpauseModule(MODULE_STAKE)` 测试 guardian 权限；生产主网可用 fork 或 testnet 演练，不建议主网随意暂停。
