@@ -1,11 +1,11 @@
-# Staking
+# StakingRewards
 
-> 一个单池 ERC20 `StakigRewards` 合约项目：用户质押 `stakingToken`，按时间线性领取 `rewardToken`。
+> 一个单池 ERC20 `StakingRewards` 合约项目：用户质押 `stakingToken`，按时间线性领取 `rewardToken`。
 > 本项目聚焦 staking 奖励会计、权限控制、暂停恢复、资金偿付和边界测试，不包含 AMM、多池 Gauge、ve 投票、手续费分红、回购或收益聚合。
 
 ## 项目定位
 
-`StakigRewards` 是一个 contracts-only 的 Solidity / Foundry 项目，用来展示一个可上线标准的单池质押奖励模块。
+`StakingRewards` 是一个 contracts-only 的 Solidity / Foundry 项目，用来展示一个可上线标准的单池质押奖励模块。
 
 核心目标：
 
@@ -22,11 +22,11 @@
 
 ## 合约范围
 
-主合约命名为 `StakigRewards`。
+主合约命名为 `StakingRewards`。
 
 | 合约 | 作用 |
 |---|---|
-| `StakigRewards` | 单池 staking、奖励累计、领取、暂停、权限和资金会计 |
+| `StakingRewards` | 单池 staking、奖励累计、领取、暂停、权限和资金会计 |
 | `MockERC20` | 测试用 staking/reward token |
 
 ## 依赖选择
@@ -101,8 +101,8 @@ function setOwnerLockdown(bool locked, bytes32 reasonHash) external onlyOwner
 
 | 场景 | 结果 |
 |---|---|
-| guardian 暂停 `STAKE`，`ownerLockdown == false` | guardian 可恢复自己暂停的 `STAKE` |
-| guardian 暂停 `STAKE`，owner 后续开启 lockdown | guardian 不能恢复，必须 owner 恢复 |
+| guardian 暂停 `MODULE_STAKE`，`ownerLockdown == false` | guardian 可恢复自己暂停的 `MODULE_STAKE` |
+| guardian 暂停 `MODULE_STAKE`，owner 后续开启 lockdown | guardian 不能恢复，必须 owner 恢复 |
 | owner 暂停任何模块 | guardian 不能恢复 |
 | owner 关闭 lockdown | guardian 只恢复自己暂停且仍满足规则的模块 |
 
@@ -227,7 +227,7 @@ MAX_REWARD_RATE = type(uint128).max
 
 部署后不需要额外 initializer，构造函数必须一次性写入所有不可变依赖和初始角色。部署脚本仍必须执行以下校验和交接流程：
 
-1. 部署 `StakigRewards(initialOwner, stakingToken, rewardToken, rewardManager, guardian, rewardsDuration)`。
+1. 部署 `StakingRewards(initialOwner, stakingToken, rewardToken, rewardManager, guardian, rewardsDuration)`。
 2. 校验 `owner() == initialOwner`。
 3. 校验 `stakingToken()`、`rewardToken()`、`rewardManager()`、`guardian()`、`rewardsDuration()` 与部署参数一致。
 4. 校验 `stakingToken() != rewardToken()`。
@@ -279,12 +279,12 @@ MAX_REWARD_RATE = type(uint128).max
 
 | 函数 | 权限 | 前置条件 | 状态变化 | 事件 | 失败错误 |
 |---|---|---|---|---|---|
-| `stake(uint256 amount)` / `deposit(uint256 amount)` | anyone | `amount > 0`，`STAKE` 未暂停，实际收到 stakingToken 等于 amount | 更新全局和用户奖励；增加 `totalSupply`、`balanceOf[msg.sender]`；转入 stakingToken | `Staked` | `ZeroAmount`、`ModuleIsPaused`、`InvalidReceivedAmount` |
+| `stake(uint256 amount)` / `deposit(uint256 amount)` | anyone | `amount > 0`，`MODULE_STAKE` 未暂停，实际收到 stakingToken 等于 amount | 更新全局和用户奖励；增加 `totalSupply`、`balanceOf[msg.sender]`；转入 stakingToken | `Staked` | `ZeroAmount`、`ModuleIsPaused`、`InvalidReceivedAmount` |
 | `withdraw(uint256 amount)` | staker | `amount > 0`，`balanceOf[msg.sender] >= amount` | 更新奖励；减少本金；转出 stakingToken | `Withdrawn` | `ZeroAmount`、`InsufficientStake` |
 | `getReward()` / `claimReward()` | anyone for self | 无 | 更新奖励；若 reward > 0，减少 `rewards[user]` 和 `aggregateClaimableRewards`，转出 rewardToken | `RewardPaid` 仅在 amount > 0 时发出 | 无奖励时不失败 |
 | `exit()` | staker or no-op user | 无 | 如果有本金则 withdraw 全部；随后 claim | `Withdrawn`、可选 `RewardPaid` | 本金和奖励都为 0 时不失败 |
 | `emergencyExit()` | staker or no-op user | 无，且不受 pause 影响 | 必须先更新用户奖励；转出全部本金；清零 `rewards[user]`；将 forfeited reward 计入 `unallocatedRewards` | `EmergencyExit` | 本金和奖励都为 0 时不失败 |
-| `fundAndNotify(uint256 amount)` | `rewardManager` | `amount > 0`，`amount <= MAX_REWARD_AMOUNT`，`REWARD_FUNDING` 未暂停，实际收到等于 amount，`0 < newRewardRate <= MAX_REWARD_RATE`，偿付检查通过 | 转入 rewardToken；更新排程奖励、rate、finish、资金会计 | `RewardAdded`，可能 `RewardsForfeited` | `OnlyRewardManager`、`ZeroAmount`、`RewardAmountTooLarge`、`InvalidReceivedAmount`、`RewardTooSmall`、`RewardRateTooLarge`、`InsufficientRewardBalance`、`ModuleIsPaused` |
+| `fundAndNotify(uint256 amount)` | `rewardManager` | `amount > 0`，`amount <= MAX_REWARD_AMOUNT`，`MODULE_REWARD_FUNDING` 未暂停，实际收到等于 amount，`0 < newRewardRate <= MAX_REWARD_RATE`，偿付检查通过 | 转入 rewardToken；更新排程奖励、rate、finish、资金会计 | `RewardAdded`，可能 `RewardsForfeited` | `OnlyRewardManager`、`ZeroAmount`、`RewardAmountTooLarge`、`InvalidReceivedAmount`、`RewardTooSmall`、`RewardRateTooLarge`、`InsufficientRewardBalance`、`ModuleIsPaused` |
 | `setRewardsDuration(uint256 newDuration)` | owner | 非活跃周期，范围 `[1 days, 30 days]` | 更新 `rewardsDuration` | `RewardsDurationUpdated` | OZ `OwnableUnauthorizedAccount`、`RewardPeriodActive`、`InvalidRewardsDuration` |
 | `setRewardManager(address newManager)` | owner | `newManager != address(0)` | 更新 `rewardManager`；不改变已注入奖励周期 | `RewardManagerUpdated` | OZ `OwnableUnauthorizedAccount`、`ZeroAddress` |
 | `setGuardian(address newGuardian)` | owner | 允许零地址 | 更新 `guardian` | `GuardianUpdated` | OZ `OwnableUnauthorizedAccount` |
@@ -391,7 +391,7 @@ function renounceOwnership() public override onlyOwner {
 - 新 `rewardManager` 从事件生效后才可以调用下一次 `fundAndNotify`。
 - 旧 `rewardManager` 事件生效后立即失去调用权，不能追加、撤回或修改已注入奖励。
 - 更换 `rewardManager` 不会改变 `leftover` 归属。周期中追加时，`leftover` 仍来自合约内已排程奖励，与新旧 manager 身份无关。
-- 若需要停止旧 manager 继续注入，应先 `setRewardManager(newManager)` 或暂停 `REWARD_FUNDING`，但不得影响用户 `withdraw/getReward/exit/emergencyExit`。
+- 若需要停止旧 manager 继续注入，应先 `setRewardManager(newManager)` 或暂停 `MODULE_REWARD_FUNDING`，但不得影响用户 `withdraw/getReward/exit/emergencyExit`。
 
 ## Guardian 暂停与恢复设计
 
@@ -840,7 +840,7 @@ emit EmergencyExit(msg.sender, principal, forfeitedReward)
 - 必须先执行全局和用户奖励更新，再读取 `forfeitedReward`。否则用户在上次 checkpoint 后新增的应计奖励会被错误遗漏。
 - `forfeitedReward` 不转给用户，进入 `unallocatedRewards`，后续只能由治理按未分配奖励规则处理。
 - `emergencyExit()` 不得减少 `accountedRewardBalance`，因为 rewardToken 仍留在合约内，只是从用户已结算奖励变成未分配奖励。
-- `emergencyExit()` 不受 `STAKE`、`REWARD_FUNDING` pause 影响。
+- `emergencyExit()` 不受 `MODULE_STAKE`、`MODULE_REWARD_FUNDING` pause 影响。
 - `principal == 0 && forfeitedReward == 0` 时 no-op 成功，可发或不发 `EmergencyExit`；若发事件，amount 均为 0。
 - 如果 stakingToken 转账失败，整个调用必须 revert，用户本金、`rewards[user]`、`aggregateClaimableRewards` 和 `unallocatedRewards` 必须全部回滚。
 
@@ -1044,7 +1044,7 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 
 | 函数 | 成功断言 | 失败断言 |
 |---|---|---|
-| `stake(amount)` | `totalSupply += amount`，`balanceOf[user] += amount`，合约 stakingToken 增加 amount，发 `Staked` | `amount == 0` 用 `ZeroAmount` revert；`STAKE` paused 用 `ModuleIsPaused` revert |
+| `stake(amount)` | `totalSupply += amount`，`balanceOf[user] += amount`，合约 stakingToken 增加 amount，发 `Staked` | `amount == 0` 用 `ZeroAmount` revert；`MODULE_STAKE` paused 用 `ModuleIsPaused` revert |
 | `withdraw(amount)` | `totalSupply -= amount`，`balanceOf[user] -= amount`，用户 stakingToken 增加 amount，发 `Withdrawn` | `amount == 0` 用 `ZeroAmount` revert；余额不足用 `InsufficientStake` revert |
 | `getReward()` | reward > 0 时用户 rewardToken 增加 reward，`aggregateClaimableRewards` 和 `accountedRewardBalance` 同步减少，发 `RewardPaid` | reward == 0 时成功 no-op，不发 `RewardPaid` |
 | `exit()` | 有本金时全部提款；有奖励时领奖；二者为 0 时成功 no-op | 不得因零本金或零奖励 revert |
@@ -1075,7 +1075,7 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 - 如果存在误转 stakingToken，则 `stakingToken.balanceOf(this) - totalSupply` 才是可恢复上限。
 - 任意外部 token 转账失败的测试中，所有核心状态变量必须等于调用前快照。
 - `exit()` 成功路径不得触发嵌套 `nonReentrant`；`emergencyExit()` 必须和 `withdraw()` 同等级受重入保护。
-- 模块级暂停验收必须能区分 `STAKE` 暂停、`REWARD_FUNDING` 暂停、owner lockdown 和 guardian 自己暂停的恢复权限。
+- 模块级暂停验收必须能区分 `MODULE_STAKE` 暂停、`MODULE_REWARD_FUNDING` 暂停、owner lockdown 和 guardian 自己暂停的恢复权限。
 
 部署验收：
 
