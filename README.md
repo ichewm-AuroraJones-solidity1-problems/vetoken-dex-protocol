@@ -40,89 +40,36 @@
 | 依赖 | 用途 |
 |---|---|
 | `Ownable2Step` | owner 权限和两步转移 ownership |
+| `Pausable` | 全局风险暂停开关，只限制新增风险入口，不阻断用户退出 |
 | `ReentrancyGuard` | 防止 `stake/withdraw/getReward/exit/emergencyExit/fundAndNotify/sweepUnallocatedRewards/recoverExcessStakingToken/recoverERC20` 重入 |
 | `SafeERC20` | 安全处理 ERC20 转账 |
 
 权限模型不使用 `AccessControl`。原因是本项目只有三个清晰角色：`owner`、`rewardManager`、`guardian`。使用 `Ownable2Step` 加显式地址变量更容易审计，也避免 role admin 层级过度复杂。
 
-暂停模型不直接使用 OpenZeppelin `Pausable` 作为唯一暂停机制，因为 OZ `Pausable` 只有全局 `paused()` 状态，不能表达 `pausedModule(bytes32)`、暂停操作者归属、guardian 只能恢复自己地址暂停的模块、owner-level lockdown 等规则。本项目应实现自定义 `ModulePausable`：
+暂停模型使用 OpenZeppelin `Pausable` 作为全局风险开关，但 paused 状态只限制新增风险入口，不锁定用户资金。
 
-```solidity
-struct PauseState {
-    bool paused;
-    address operator;
-    bool byGuardian;
-}
+暂停权限：
 
-mapping(bytes32 => PauseState) private _pauseState;
-bool public ownerLockdown;
-```
+- `owner` 和 `guardian` 都可以调用 `pause(bytes32 reasonHash)`，用于快速阻断新增风险。
+- 只有 `owner` 可以调用 `unpause()`。恢复协议正常运行应由 owner、多签或 timelock 明确确认，guardian 不拥有恢复权限。
+- `pause(reasonHash)` 必须触发 OZ `Paused(operator)`，并额外发出 `PauseReason(operator, reasonHash)` 方便监控和事故追踪。
+- `unpause()` 使用 OZ `Unpaused(operator)`。
 
-如果实现仍继承 OZ `Pausable`，只能把它作为全局 owner lockdown 使用，不能替代模块级暂停。
+paused 状态下禁止：
 
-合法模块集合必须固定，不允许 owner 动态新增模块：
+- `stake/deposit`
+- `fundAndNotify`
 
-```solidity
-bytes32 public constant MODULE_STAKE = keccak256("STAKE");
-bytes32 public constant MODULE_REWARD_FUNDING = keccak256("REWARD_FUNDING");
-```
+paused 状态下仍允许：
 
-模块规则：
+- `withdraw`
+- `getReward/claimReward`
+- `exit`
+- `emergencyExit`
+- `syncUnallocatedRewards`
+- owner 安全修复和治理资金处理函数，例如 `setGuardian`、`setRewardManager`、`setRewardsDuration`、`sweepUnallocatedRewards`、`recoverExcessStakingToken`、`recoverERC20`
 
-- 只有 `MODULE_STAKE` 和 `MODULE_REWARD_FUNDING` 是合法可传入模块。
-- `WITHDRAW` 和 `CLAIM` 只是文档中的行为标签，不是合法 module 常量，也不能传入 `pauseModule/unpauseModule/pausedModule/pauseState`。
-- `pausedModule`、`pauseState` 收到非法 module 必须 revert `InvalidModule(module)`。
-- `pauseModule`、`unpauseModule` 这类写函数必须先鉴权、再校验 module。非 owner / 非 guardian 调用 `pauseModule(WITHDRAW)` 或 `unpauseModule(WITHDRAW)` 必须 revert `OnlyGuardianOrOwner()`；已授权调用者传入非法 module 时才 revert `InvalidModule(module)`。
-- 因为 `WITHDRAW` 和 `CLAIM` 不是合法 module，不能用 `pausedModule(WITHDRAW)` 或 `pausedModule(CLAIM)` 表示 false；正确行为是直接 revert。
-- 不得把 `mapping(bytes32 => PauseState)` 声明为 `public`，因为 Solidity 自动 getter 对非法 module 只会返回零值结构体，无法执行 `InvalidModule` 校验。实现必须使用 private `_pauseState`，并显式提供会校验 module 的 `pauseState(bytes32 module)` view。
-- owner 也不能新增模块或暂停未定义模块，避免未来误把用户退出路径纳入暂停范围。
-
-### Owner Lockdown
-
-`ownerLockdown` 是 owner 级全局紧急锁定开关，初始值必须为 `false`。
-
-状态变量：
-
-```solidity
-bool public ownerLockdown; // default false
-```
-
-接口：
-
-```solidity
-function setOwnerLockdown(bool locked, bytes32 reasonHash) external onlyOwner
-```
-
-语义：
-
-- 只有 owner 可以开启或关闭 `ownerLockdown`。
-- `ownerLockdown == true` 时，所有 guardian `unpauseModule` 都必须 revert。
-- `ownerLockdown == true` 不会自动暂停模块，也不会自动改变 `_pauseState[module].paused`。
-- `ownerLockdown` 的作用范围是 guardian 恢复权限，不影响用户 `withdraw/getReward/exit/emergencyExit`。
-- `ownerLockdown` 不影响 owner 自己调用 `unpauseModule`、角色变更或资金治理操作。
-- 该开关是可逆的；owner 可以从 `true` 设置回 `false`。
-- 开关变化必须发出 `OwnerLockdownUpdated(operator, locked, reasonHash)`。
-- 重复设置为当前值必须成功并发出事件。例如 `setOwnerLockdown(true, reasonHash)` 在已经为 `true` 时仍成功、状态保持 `true`，并发出新的 `OwnerLockdownUpdated`，方便索引器记录治理操作。
-
-与 `pauseModule/unpauseModule` 的关系：
-
-| 场景 | 结果 |
-|---|---|
-| guardian 暂停 `MODULE_STAKE`，`ownerLockdown == false` | 当初执行 pause 的 guardian 地址可恢复自己地址暂停的 `MODULE_STAKE` |
-| guardian 暂停 `MODULE_STAKE`，owner 后续开启 lockdown | guardian 不能恢复，必须 owner 恢复 |
-| owner 暂停任何模块 | guardian 不能恢复 |
-| owner 关闭 lockdown | 当前 guardian 只能恢复由自己地址暂停且仍满足规则的模块 |
-
-重复 pause/unpause 规则：
-
-- `pauseModule(module, reasonHash)` 只能从未暂停状态切换到暂停状态。
-- 对已经 paused 的 module 再调用 `pauseModule` 必须 revert `ModuleAlreadyPaused(module)`，不得 no-op，也不得覆盖 `operator/byGuardian/reasonHash`。
-- guardian 暂停后，owner 再 pause 同一 module 必须 revert `ModuleAlreadyPaused(module)`；owner 若要接管恢复流程，应直接调用 `unpauseModule(module)`，必要时再重新 `pauseModule(module, reasonHash)`。
-- owner 暂停后，guardian 再 pause 同一 module 必须 revert `ModuleAlreadyPaused(module)`，不能把 owner 暂停降级成 guardian 暂停。
-- guardian 自己地址暂停的判定口径固定为：`_pauseState[module].byGuardian == true && _pauseState[module].operator == msg.sender`。只检查 `byGuardian == true` 不够安全。
-- 如果 guardian A 暂停 `MODULE_STAKE` 后，owner 调用 `setGuardian(B)`，新 guardian B 不能恢复 A 暂停的模块；A 已不再是当前 guardian 也不能恢复，只有 owner 可以恢复。
-- `unpauseModule(module)` 只能从暂停状态切回未暂停状态；未暂停时调用必须 revert `ModuleNotPaused(module)`。
-- 成功 `unpauseModule` 后必须清除该 module 的 `operator` 和 `byGuardian` 记录，避免旧暂停者影响下一次 pause。
+这个模型的安全目标是：暂停用于阻止新增风险，不用于冻结用户退出和领奖路径。
 
 ### 资金接收 Allowlist
 
@@ -252,7 +199,7 @@ MAX_REWARD_RATE = type(uint128).max
 4. 校验 `stakingToken() != rewardToken()`。
 5. 校验初始奖励状态为未开启：`periodFinish == 0`、`rewardRate == 0`、`lastUpdateTime == 0`、`rewardPerTokenStored == 0`。
 6. 校验资金会计为空：`totalSupply == 0`、`scheduledRewards == 0`、`accruedRewardReserve == 0`、`aggregateClaimableRewards == 0`、`unallocatedRewards == 0`、`pendingUserDustScaled == 0`、`accountedRewardBalance == 0`。
-7. 校验 `ownerLockdown() == false`，`pausedModule(MODULE_STAKE) == false`，`pausedModule(MODULE_REWARD_FUNDING) == false`。
+7. 校验 `paused() == false`。
 8. owner 必须调用 `setSweepRecipientAllowed(treasury, true)`、`setSweepRecipientAllowed(rewardManager, true)` 和 `setSweepRecipientAllowed(recoveryRecipient, true)`，除非其中某个地址明确不承担资金接收职责。
 9. 校验 `sweepRecipientAllowed(treasury) == true`、`sweepRecipientAllowed(rewardManager) == true`、`sweepRecipientAllowed(recoveryRecipient) == true`；未被 allowlist 的地址不得作为 `sweepUnallocatedRewards/recoverExcessStakingToken/recoverERC20` 的 `to`。
 10. 如果 `initialOwner` 临时设置为部署者 EOA，部署交易后必须立即调用 `transferOwnership(multisigOrTimelock)`，并由目标地址 `acceptOwnership()`。
@@ -292,9 +239,7 @@ MAX_REWARD_RATE = type(uint128).max
 | `unallocatedRewards()` | `0` |
 | `pendingUserDustScaled()` | `0` |
 | `accountedRewardBalance()` | `0` |
-| `ownerLockdown()` | `false` |
-| `pausedModule(MODULE_STAKE)` | `false` |
-| `pausedModule(MODULE_REWARD_FUNDING)` | `false` |
+| `paused()` | `false` |
 
 `lastTimeRewardApplicable()` 在 `periodFinish == 0` 时必须返回 `0`，不能返回当前时间，否则未开启周期时会污染奖励计算。
 
@@ -304,19 +249,18 @@ MAX_REWARD_RATE = type(uint128).max
 
 | 函数 | 权限 | 前置条件 | 状态变化 | 事件 | 失败错误 |
 |---|---|---|---|---|---|
-| `stake(uint256 amount)` / `deposit(uint256 amount)` | anyone | `amount > 0`，`MODULE_STAKE` 未暂停，实际收到 stakingToken 等于 amount | 更新全局和用户奖励；增加 `totalSupply`、`balanceOf[msg.sender]`；转入 stakingToken | `Staked`，checkpoint 可能发 `RewardsForfeited`、`UserCheckpointDust` | `ZeroAmount`、`ModuleIsPaused`、`InvalidReceivedAmount` |
+| `stake(uint256 amount)` / `deposit(uint256 amount)` | anyone | `amount > 0`，`paused() == false`，实际收到 stakingToken 等于 amount | 更新全局和用户奖励；增加 `totalSupply`、`balanceOf[msg.sender]`；转入 stakingToken | `Staked`，checkpoint 可能发 `RewardsForfeited`、`UserCheckpointDust` | `ZeroAmount`、OZ `EnforcedPause`、`InvalidReceivedAmount` |
 | `withdraw(uint256 amount)` | staker | `amount > 0`，`balanceOf[msg.sender] >= amount` | 更新奖励；减少本金；转出 stakingToken | `Withdrawn`，checkpoint 可能发 `RewardPerTokenDust`、`UserCheckpointDust` | `ZeroAmount`、`InsufficientStake` |
 | `getReward()` / `claimReward()` | anyone for self | 无 | 更新奖励；若 reward > 0，减少 `rewards[user]` 和 `aggregateClaimableRewards`，转出 rewardToken | `RewardPaid` 仅在 amount > 0 时发出；checkpoint 可能发 `RewardsForfeited`、`UserCheckpointDust` | 无奖励时不失败 |
 | `exit()` | staker or no-op user | 无 | 如果有本金则 withdraw 全部；随后 claim | `Withdrawn`、可选 `RewardPaid`；checkpoint 可能发 `RewardsForfeited`、`RewardPerTokenDust`、`UserCheckpointDust` | 本金和奖励都为 0 时不失败 |
 | `emergencyExit()` | staker or no-op user | 无，且不受 pause 影响 | 必须先更新用户奖励；转出全部本金；清零 `rewards[user]`；将 forfeited reward 计入 `unallocatedRewards` | `EmergencyExit`；checkpoint 可能发 `RewardsForfeited`、`RewardPerTokenDust`、`UserCheckpointDust` | 本金和奖励都为 0 时不失败 |
-| `fundAndNotify(uint256 amount)` | `rewardManager` | `amount > 0`，`amount <= MAX_REWARD_AMOUNT`，`MODULE_REWARD_FUNDING` 未暂停，实际收到等于 amount，`0 < newRewardRate <= MAX_REWARD_RATE`，偿付检查通过 | 转入 rewardToken；更新排程奖励、rate、finish、资金会计 | `RewardAdded`，checkpoint 可能发 `RewardsForfeited` | `OnlyRewardManager`、`ZeroAmount`、`RewardAmountTooLarge`、`InvalidReceivedAmount`、`RewardTooSmall`、`RewardRateTooLarge`、`InsufficientRewardBalance`、`ModuleIsPaused` |
+| `fundAndNotify(uint256 amount)` | `rewardManager` | `amount > 0`，`amount <= MAX_REWARD_AMOUNT`，`paused() == false`，实际收到等于 amount，`0 < newRewardRate <= MAX_REWARD_RATE`，偿付检查通过 | 转入 rewardToken；更新排程奖励、rate、finish、资金会计 | `RewardAdded`，checkpoint 可能发 `RewardsForfeited` | `OnlyRewardManager`、`ZeroAmount`、`RewardAmountTooLarge`、`InvalidReceivedAmount`、`RewardTooSmall`、`RewardRateTooLarge`、`InsufficientRewardBalance`、OZ `EnforcedPause` |
 | `setRewardsDuration(uint256 newDuration)` | owner | 非活跃周期，范围 `[MIN_REWARDS_DURATION, MAX_REWARDS_DURATION]` | 更新 `rewardsDuration` | `RewardsDurationUpdated` | OZ `OwnableUnauthorizedAccount`、`RewardPeriodActive`、`InvalidRewardsDuration` |
 | `setRewardManager(address newManager)` | owner | `newManager != address(0)` | 更新 `rewardManager`；不改变已注入奖励周期 | `RewardManagerUpdated` | OZ `OwnableUnauthorizedAccount`、`ZeroAddress` |
 | `setGuardian(address newGuardian)` | owner | 允许零地址 | 更新 `guardian` | `GuardianUpdated` | OZ `OwnableUnauthorizedAccount` |
-| `setOwnerLockdown(bool locked, bytes32 reasonHash)` | owner | 无 | 设置 `ownerLockdown = locked`；重复设置当前值也成功 | `OwnerLockdownUpdated` | OZ `OwnableUnauthorizedAccount` |
 | `setSweepRecipientAllowed(address recipient, bool allowed)` | owner | `recipient != address(0)` | 设置 `sweepRecipientAllowed[recipient] = allowed`；重复设置当前值也成功 | `SweepRecipientUpdated` | OZ `OwnableUnauthorizedAccount`、`ZeroAddress` |
-| `pauseModule(bytes32 module, bytes32 reasonHash)` | owner or guardian | module 必须是合法且未暂停模块；guardian 只能暂停允许模块 | 标记模块暂停，记录暂停操作者类型 | `ModulePaused` | `OnlyGuardianOrOwner`、`InvalidModule`、`ModuleAlreadyPaused`、`GuardianNotAllowed` |
-| `unpauseModule(bytes32 module)` | owner or guardian | module 必须是合法且已暂停模块；owner 可恢复；guardian 只能恢复 `operator == msg.sender` 且 `byGuardian == true` 且未 owner lockdown 的模块 | 清除模块暂停 | `ModuleUnpaused` | `OnlyGuardianOrOwner`、`InvalidModule`、`ModuleNotPaused`、`OwnerLockdownActive`、`GuardianCannotUnpause` |
+| `pause(bytes32 reasonHash)` | owner or guardian | 当前未 paused | 进入全局 paused 状态 | OZ `Paused`、`PauseReason` | `OnlyGuardianOrOwner`、OZ `EnforcedPause` |
+| `unpause()` | owner | 当前 paused | 退出全局 paused 状态 | OZ `Unpaused` | OZ `OwnableUnauthorizedAccount`、OZ `ExpectedPause` |
 | `syncUnallocatedRewards()` | anyone | `rewardToken.balanceOf(this) > accountedRewardBalance` | 将未入账余额计入 `unallocatedRewards` 和 `accountedRewardBalance` | `UnallocatedRewardsSynced` | `NoUnaccountedRewards` |
 | `sweepUnallocatedRewards(address to, uint256 amount)` | owner | `to != address(0)` 且已允许，`amount > 0`，`amount <= sweepableUnallocatedRewards()` | 先 checkpoint 全局奖励；减少 `unallocatedRewards` 和 `accountedRewardBalance`；转出 rewardToken | `UnallocatedRewardsSwept`，checkpoint 可能发 `RewardsForfeited` | OZ `OwnableUnauthorizedAccount`、`ZeroAddress`、`ZeroAmount`、`InvalidSweepRecipient`、`InsufficientUnallocatedRewards` |
 | `recoverExcessStakingToken(address to, uint256 amount)` | owner | `to != address(0)` 且已允许，`amount > 0`，`amount <= stakingToken.balanceOf(this) - totalSupply` | 转出误转的超额 stakingToken，不改变用户本金会计 | `ExcessStakingTokenRecovered` | OZ `OwnableUnauthorizedAccount`、`ZeroAddress`、`ZeroAmount`、`InvalidSweepRecipient`、`InsufficientExcessStakingToken` |
@@ -335,8 +279,7 @@ MAX_REWARD_RATE = type(uint128).max
 | `sweepableUnallocatedRewards()` | 如果现在调用 `sweepUnallocatedRewards`，理论上可 sweep 的金额；必须模拟 checkpoint 会新增的 pending unallocated reward |
 | `unreservedRewardBalance()` | 当前尚未进入内部会计分类的 rewardToken 余额；正常情况下应为 0，误转后可通过 `syncUnallocatedRewards` 归类 |
 | `isRewardPeriodActive()` | `block.timestamp < periodFinish` |
-| `pausedModule(bytes32 module)` | 指定合法模块是否暂停；非法 module 必须 revert `InvalidModule` |
-| `pauseState(bytes32 module)` | 返回合法模块的 pause state；非法 module 必须 revert `InvalidModule`，不能依赖 public mapping getter |
+| `paused()` | OZ `Pausable` 全局风险开关状态 |
 
 ### 错误策略
 
@@ -358,15 +301,8 @@ error RewardRateTooLarge(uint256 rewardRate, uint256 maxRate);
 error InvalidReceivedAmount(uint256 expected, uint256 received);
 error InsufficientRewardBalance(uint256 required, uint256 available);
 error InsufficientStake(uint256 requested, uint256 available);
-error ModuleIsPaused(bytes32 module);
-error ModuleAlreadyPaused(bytes32 module);
-error ModuleNotPaused(bytes32 module);
-error InvalidModule(bytes32 module);
-error GuardianNotAllowed(bytes32 module);
-error GuardianCannotUnpause(bytes32 module);
 error InvalidSweepRecipient(address to);
 error CannotRecoverCoreToken(address token);
-error OwnerLockdownActive();
 error RenounceOwnershipDisabled();
 error InsufficientExcessStakingToken(uint256 requested, uint256 available);
 error InsufficientUnallocatedRewards(uint256 requested, uint256 available);
@@ -381,7 +317,7 @@ error NoUnaccountedRewards();
 |---|---|---|
 | `owner` | 参数变更、角色变更、治理资金处理、owner pause/unpause | 使用 OZ `Ownable2Step` |
 | `rewardManager` | `fundAndNotify(amount)` | 只能注入奖励，不能提取用户资金或改参数 |
-| `guardian` | 紧急 `pause`，受限 `unpause` | 快速响应事故，不拥有资金权限 |
+| `guardian` | 紧急 `pause` | 快速响应事故，不拥有资金权限，也不能恢复 paused 状态 |
 | 用户 | `stake/withdraw/getReward/exit` | 管理自己的本金和奖励 |
 
 角色关系：
@@ -401,7 +337,7 @@ error NoUnaccountedRewards();
 | `setRewardManager(newRewardManager)` | owner | 不允许零地址 | `RewardManagerUpdated(oldManager, newManager)` |
 | `setGuardian(newGuardian)` | owner | 允许零地址，用于禁用 guardian | `GuardianUpdated(oldGuardian, newGuardian)` |
 
-`setRewardManager(address(0))` 不允许。若需要停止新增奖励，应暂停 `fundAndNotify` 或将 `rewardManager` 切换到治理控制地址。
+`setRewardManager(address(0))` 不允许。若需要停止新增奖励，应调用 `pause(reasonHash)` 暂停新增风险入口，或将 `rewardManager` 切换到治理控制地址。
 
 `setGuardian(address(0))` 允许，但只能由 owner 执行。设置后 guardian 相关函数全部不可用。
 
@@ -419,43 +355,30 @@ function renounceOwnership() public override onlyOwner {
 - 新 `rewardManager` 从事件生效后才可以调用下一次 `fundAndNotify`。
 - 旧 `rewardManager` 事件生效后立即失去调用权，不能追加、撤回或修改已注入奖励。
 - 更换 `rewardManager` 不会改变 `leftover` 归属。周期中追加时，`leftover` 仍来自合约内已排程奖励，与新旧 manager 身份无关。
-- 若需要停止旧 manager 继续注入，应先 `setRewardManager(newManager)` 或暂停 `MODULE_REWARD_FUNDING`，但不得影响用户 `withdraw/getReward/exit/emergencyExit`。
+- 若需要停止旧 manager 继续注入，应先 `setRewardManager(newManager)` 或调用 `pause(reasonHash)` 暂停新增风险入口，但不得影响用户 `withdraw/getReward/exit/emergencyExit`。
 
 ## Guardian 暂停与恢复设计
 
-Guardian 被允许调用受限 `unpause` 是有意设计，不是权限泄漏。原因是紧急多签可能误暂停，或者风险解除后需要快速恢复用户正常交互；如果只能等待 Timelock，用户体验和资金效率会受到不必要影响。
+Guardian 只负责紧急暂停，不负责恢复协议。`pause` 是快速止血操作，可以交给 guardian；`unpause` 是恢复协议正常运行，应由 owner、多签或 timelock 确认后执行。
 
 约束条件：
 
-- Guardian 可以暂停新增风险入口：`stake/deposit` 和 `fundAndNotify`。
-- Guardian 不得暂停 `withdraw`、`getReward/claimReward`、`exit`，用户必须始终能退出和领取已结算奖励。
-- Guardian 的 `unpause` 只能恢复由自己地址暂停的模块，即 `_pauseState[module].byGuardian == true && _pauseState[module].operator == msg.sender`。
-- 如果 owner 执行了 owner-level pause 或设置了 `ownerLockdown = true`，guardian 不能 unpause，必须由 owner 恢复。
+- Guardian 和 owner 都可以调用 `pause(reasonHash)`。
+- 只有 owner 可以调用 `unpause()`。
+- paused 状态只阻止 `stake/deposit` 和 `fundAndNotify`。
+- paused 状态不阻止 `withdraw`、`getReward/claimReward`、`exit`、`emergencyExit`，用户必须始终能退出和领取已结算奖励。
 - Guardian 不能修改 `rewardManager`、`rewardsDuration`、owner、token 地址或任何资金接收地址。
 - Guardian 不能调用 `sweepUnallocatedRewards` 或任何资金提取函数。
-- 每次 pause/unpause 必须包含事件。`pauseModule` 事件必须记录 `operator`、`module` 和 `reasonHash`；`unpauseModule` 事件至少记录 `operator` 和 `module`，不强制要求 `reasonHash`。
-
-推荐暂停模块：
-
-| 模块 | bytes32 值 | guardian 可暂停 | guardian 可恢复 | 用户退出是否受影响 |
-|---|---|---:|---:|---:|
-| `MODULE_STAKE` | `keccak256("STAKE")` | yes | yes，仅限 `operator == msg.sender` 的当前 guardian | no |
-| `MODULE_REWARD_FUNDING` | `keccak256("REWARD_FUNDING")` | yes | yes，仅限 `operator == msg.sender` 的当前 guardian | no |
-
-非模块标签：
-
-| 标签 | 是否可传入 module | 说明 |
-|---|---:|---|
-| `WITHDRAW` | no | 用户退出路径不支持暂停 |
-| `CLAIM` | no | 用户领取路径不支持暂停 |
+- 每次 `pause(reasonHash)` 必须发出 OZ `Paused(operator)` 和 `PauseReason(operator, reasonHash)`。
+- 每次 `unpause()` 必须发出 OZ `Unpaused(operator)`。
 
 Paused 状态下管理员操作：
 
-- `MODULE_STAKE` 暂停时，用户 `stake/deposit` 必须 revert，但 `withdraw/getReward/exit/earned` 不受影响。
-- `MODULE_REWARD_FUNDING` 暂停时，`fundAndNotify` 必须 revert，但 `syncUnallocatedRewards` 和 view 函数不受影响。
-- paused 状态下 owner 仍可以执行安全修复类管理操作：`setGuardian`、`setRewardManager`、`setRewardsDuration`、`sweepUnallocatedRewards`、`unpauseModule`。
+- paused 状态下，用户 `stake/deposit` 必须 revert，但 `withdraw/getReward/exit/earned/emergencyExit` 不受影响。
+- paused 状态下，`fundAndNotify` 必须 revert，但 `syncUnallocatedRewards` 和 view 函数不受影响。
+- paused 状态下 owner 仍可以执行安全修复类管理操作：`setGuardian`、`setRewardManager`、`setRewardsDuration`、`sweepUnallocatedRewards`、`recoverExcessStakingToken`、`recoverERC20`、`unpause`。
 - paused 状态下 owner 不能绕过活跃周期限制修改 `rewardsDuration`，也不能 sweep 超过 `unallocatedRewards` 的资金。
-- paused 状态下 guardian 只能对 `operator == msg.sender` 且 `byGuardian == true` 的允许模块执行 `unpauseModule`，不能执行资金处理或参数变更。
+- paused 状态下 guardian 不能执行 `unpause`、资金处理或参数变更。
 - 暂停不应改变奖励公式。只要时间流逝，活跃周期内的奖励仍按规则释放；如果 `totalSupply == 0`，对应奖励仍进入 `unallocatedRewards`。
 
 ## 核心状态变量
@@ -465,7 +388,7 @@ Paused 状态下管理员操作：
 | `stakingToken` | 用户质押资产，immutable |
 | `rewardToken` | 奖励资产，immutable |
 | `rewardManager` | 可注入奖励的地址 |
-| `guardian` | 可紧急暂停/受限恢复的地址 |
+| `guardian` | 可紧急暂停新增风险入口的地址 |
 | `rewardsDuration` | 奖励释放周期 |
 | `periodFinish` | 当前奖励周期结束时间 |
 | `rewardRate` | 每秒释放奖励数量 |
@@ -930,7 +853,7 @@ emit EmergencyExit(msg.sender, principal, forfeitedReward)
 - 必须先执行全局和用户奖励更新，再读取 `forfeitedReward`。否则用户在上次 checkpoint 后新增的应计奖励会被错误遗漏。
 - `forfeitedReward` 不转给用户，进入 `unallocatedRewards`，后续只能由治理按未分配奖励规则处理。
 - `emergencyExit()` 不得减少 `accountedRewardBalance`，因为 rewardToken 仍留在合约内，只是从用户已结算奖励变成未分配奖励。
-- `emergencyExit()` 不受 `MODULE_STAKE`、`MODULE_REWARD_FUNDING` pause 影响。
+- `emergencyExit()` 不受 OZ `paused()` 影响。
 - `principal == 0 && forfeitedReward == 0` 时 no-op 成功，但仍必须发出 `EmergencyExit(msg.sender, 0, 0)`，保证事件规则和验收标准一致。
 - 如果 stakingToken 转账失败，整个调用必须 revert，用户本金、`rewards[user]`、`aggregateClaimableRewards` 和 `unallocatedRewards` 必须全部回滚。
 
@@ -975,18 +898,16 @@ event ERC20Recovered(address indexed operator, address indexed token, address in
 event RewardManagerUpdated(address indexed oldManager, address indexed newManager);
 event GuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
 event RewardsDurationUpdated(uint256 oldDuration, uint256 newDuration);
-event OwnerLockdownUpdated(address indexed operator, bool locked, bytes32 reasonHash);
 event SweepRecipientUpdated(address indexed recipient, bool allowed);
 ```
 
 暂停事件：
 
 ```solidity
-event ModulePaused(bytes32 indexed module, address indexed operator, bytes32 reasonHash);
-event ModuleUnpaused(bytes32 indexed module, address indexed operator);
+event PauseReason(address indexed operator, bytes32 reasonHash);
 ```
 
-OZ `Ownable2Step` 会提供 ownership 相关事件。
+OZ `Ownable2Step` 会提供 ownership 相关事件，OZ `Pausable` 会提供 `Paused(address account)` 和 `Unpaused(address account)`。
 
 事件规则：
 
@@ -1001,7 +922,7 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 - `RewardsForfeited` 的 `startTime` 必须取本次 `_updateGlobalReward()` 执行前的 `lastUpdateTime`，`endTime` 必须取本次的 `lastTimeRewardApplicable()`，`amount` 必须取实际从 `scheduledRewards` 移入 `unallocatedRewards` 的 `released = min((endTime - startTime) * rewardRate, scheduledRewards)`。
 - 当 `endTime <= startTime` 或 `released == 0` 时不得发 `RewardsForfeited`。如果因为 `scheduledRewards` 上限导致 `amount < (endTime - startTime) * rewardRate`，事件消费者必须以 `amount` 为准，不能用时间差和 `rewardRate` 反推金额。
 - 任何角色变更必须发事件。
-- 任何 pause/unpause 必须发事件；`ModulePaused` 必须带 `reasonHash`，`ModuleUnpaused` 不带 `reasonHash`。
+- 任何 pause/unpause 必须发事件；`pause(reasonHash)` 必须发 OZ `Paused(operator)` 和 `PauseReason(operator, reasonHash)`，`unpause()` 必须发 OZ `Unpaused(operator)`。
 
 ## 安全不变量
 
@@ -1035,9 +956,7 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 - owner 来自构造函数参数，而不是隐式部署者。
 - `setRewardManager(address(0))` revert。
 - `setGuardian(address(0))` 成功并禁用 guardian。
-- `setOwnerLockdown(true/false)` 只能由 owner 调用，事件包含 operator、locked、reasonHash；初始值为 false。
 - `setSweepRecipientAllowed(recipient, allowed)` 只能由 owner 调用，零地址 revert，事件包含 recipient 和 allowed。
-- 重复 `setOwnerLockdown(currentValue, reasonHash)` 必须成功并再次发 `OwnerLockdownUpdated`，状态保持不变。
 - 重复 `setSweepRecipientAllowed(recipient, currentValue)` 必须成功并再次发 `SweepRecipientUpdated`，状态保持不变。
 - owner 可与 rewardManager/guardian 相同，但生产部署脚本应提示风险。
 - `Ownable2Step` ownership 转移流程测试通过。
@@ -1124,19 +1043,16 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 
 暂停与恢复：
 
-- guardian 可暂停 `MODULE_STAKE` 和 `MODULE_REWARD_FUNDING`。
-- `WITHDRAW` 和 `CLAIM` 不是合法模块；已授权 caller 传入 `pauseModule/unpauseModule/pausedModule/pauseState` 必须 `InvalidModule` revert。
-- 非 owner / 非 guardian 调用 `pauseModule(WITHDRAW)` 或 `unpauseModule(WITHDRAW)` 必须优先 revert `OnlyGuardianOrOwner()`，不能先暴露 `InvalidModule`。
-- 已授权 caller 传入非法 module 时才 revert `InvalidModule(module)`。
-- 已暂停 module 再次 `pauseModule` 必须 `ModuleAlreadyPaused` revert，不得覆盖原 `operator/byGuardian`。
-- 未暂停 module 调用 `unpauseModule` 必须 `ModuleNotPaused` revert。
-- guardian 暂停后 owner 再 pause 同一 module 必须 `ModuleAlreadyPaused` revert；owner 可以直接 unpause。
-- owner 暂停后 guardian 再 pause 同一 module 必须 `ModuleAlreadyPaused` revert，不能覆盖 owner 暂停来源。
-- guardian 只能恢复自己地址暂停的模块；测试必须覆盖 guardian A 暂停后轮换到 guardian B，B 不能恢复，A 因不再是当前 guardian 也不能恢复，owner 可以恢复。
-- owner-level lockdown 后 guardian 不能 unpause。
-- owner-level lockdown 开启后不自动暂停模块，只阻止 guardian unpause；关闭后 guardian 只能恢复自己地址暂停的模块。
-- pause/unpause 都发事件。
-- 模块级暂停必须使用显式 `pausedModule` / `pauseState` view 测试，不能只测试 OZ 全局 `paused()`；`pauseState` 不能是 Solidity public mapping 自动 getter。
+- guardian 和 owner 都可以调用 `pause(reasonHash)`。
+- 非 owner / 非 guardian 调用 `pause(reasonHash)` 必须 revert `OnlyGuardianOrOwner()`。
+- 只有 owner 可以调用 `unpause()`；guardian 调用 `unpause()` 必须以 OZ owner error revert。
+- 已 paused 时再次 `pause(reasonHash)` 必须按 OZ `Pausable` 标准错误 revert。
+- 未 paused 时调用 `unpause()` 必须按 OZ `Pausable` 标准错误 revert。
+- paused 后 `stake/deposit` 必须 revert。
+- paused 后 `fundAndNotify` 必须 revert。
+- paused 后 `withdraw/getReward/exit/emergencyExit` 必须仍可执行。
+- `pause(reasonHash)` 必须发 OZ `Paused` 和 `PauseReason`；`unpause()` 必须发 OZ `Unpaused`。
+- 暂停测试必须使用 OZ `paused()` view，不再引入模块级暂停接口或模块常量。
 
 奖励周期：
 
@@ -1159,7 +1075,7 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 
 | 函数 | 成功断言 | 失败断言 |
 |---|---|---|
-| `stake(amount)` | `totalSupply += amount`，`balanceOf[user] += amount`，合约 stakingToken 增加 amount，发 `Staked`；前置 checkpoint 产生空池 forfeited 或用户 dust 时，分别断言 `RewardsForfeited`、`UserCheckpointDust` | `amount == 0` 用 `ZeroAmount` revert；`MODULE_STAKE` paused 用 `ModuleIsPaused` revert |
+| `stake(amount)` | `totalSupply += amount`，`balanceOf[user] += amount`，合约 stakingToken 增加 amount，发 `Staked`；前置 checkpoint 产生空池 forfeited 或用户 dust 时，分别断言 `RewardsForfeited`、`UserCheckpointDust` | `amount == 0` 用 `ZeroAmount` revert；paused 时用 OZ `EnforcedPause` revert |
 | `withdraw(amount)` | `totalSupply -= amount`，`balanceOf[user] -= amount`，用户 stakingToken 增加 amount，发 `Withdrawn`；用户 dust 发 `UserCheckpointDust`；提现后 `totalSupply == 0` 且 flush 残余时发 `RewardPerTokenDust` | `amount == 0` 用 `ZeroAmount` revert；余额不足用 `InsufficientStake` revert |
 | `getReward()` | reward > 0 时用户 rewardToken 增加 reward，`aggregateClaimableRewards` 和 `accountedRewardBalance` 同步减少，发 `RewardPaid`；空池 forfeited 和用户 dust 分别发 `RewardsForfeited`、`UserCheckpointDust` | reward == 0 时成功 no-op，不发 `RewardPaid` |
 | `exit()` | 有本金时全部提款；有奖励时领奖；二者为 0 时成功 no-op；内部 withdraw/claim 路径产生的 `RewardsForfeited`、`UserCheckpointDust`、`RewardPerTokenDust` 必须按事件规则断言 | 不得因零本金或零奖励 revert |
@@ -1168,10 +1084,9 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 | `setRewardsDuration(newDuration)` | 非活跃期内更新 duration，且 `MIN_REWARDS_DURATION <= newDuration <= MAX_REWARDS_DURATION`，发 `RewardsDurationUpdated` | 活跃期、0、小于 `MIN_REWARDS_DURATION`、大于 `MAX_REWARDS_DURATION`、非 owner 均 revert |
 | `setRewardManager(newManager)` | `rewardManager` 更新为 newManager，发 `RewardManagerUpdated(old,new)`，不改变当前奖励周期 | 非 owner 用 OZ owner error；零地址用 `ZeroAddress` |
 | `setGuardian(newGuardian)` | `guardian` 更新为 newGuardian，零地址表示禁用，发 `GuardianUpdated(old,new)` | 非 owner 用 OZ owner error |
-| `setOwnerLockdown(locked, reasonHash)` | `ownerLockdown == locked`，发 `OwnerLockdownUpdated`；重复设置当前值也成功并发事件；不自动改变任何 module pause 状态 | 非 owner 用 OZ owner error |
 | `setSweepRecipientAllowed(recipient, allowed)` | `sweepRecipientAllowed[recipient] == allowed`，发 `SweepRecipientUpdated`；重复设置当前值也成功并发事件 | 非 owner用 OZ owner error；零地址用 `ZeroAddress` |
-| `pauseModule(module, reasonHash)` | 合法且未暂停的 module 进入 paused；记录 operator 和 byGuardian；发 `ModulePaused` | 非 owner/guardian、非法 module、module 已暂停、guardian 暂停不允许模块均 revert |
-| `unpauseModule(module)` | owner 可恢复已暂停的合法 module；guardian 只能恢复 `operator == msg.sender` 且无 lockdown 的 module；发 `ModuleUnpaused` | 非 owner/guardian、非法 module、module 未暂停、owner lockdown、guardian 恢复非自己地址暂停模块均 revert |
+| `pause(reasonHash)` | 全局 `paused() == true`；发 OZ `Paused` 和 `PauseReason` | 非 owner/guardian 用 `OnlyGuardianOrOwner`；已 paused 时用 OZ `EnforcedPause` |
+| `unpause()` | 全局 `paused() == false`；发 OZ `Unpaused` | 非 owner 用 OZ owner error；未 paused 时用 OZ `ExpectedPause` |
 | `syncUnallocatedRewards()` | 将 `rewardToken.balanceOf(this) - accountedRewardBalance` 加入 `unallocatedRewards` 和 `accountedRewardBalance`，发 `UnallocatedRewardsSynced` | 无未入账余额时 `NoUnaccountedRewards` revert |
 | `sweepUnallocatedRewards(to, amount)` | 先 checkpoint；允许 amount 最大为调用前 `sweepableUnallocatedRewards()`；只减少 checkpoint 后的 `unallocatedRewards` 和 `accountedRewardBalance`，用户本金和奖励不变，发 `UnallocatedRewardsSwept`；前置 checkpoint 产生空池 forfeited 时发 `RewardsForfeited`；有质押的前置 checkpoint 不得发 `RewardPerTokenDust` | 非 owner、to 不允许、amount 为 0、amount 超过 checkpoint 后 `unallocatedRewards` 均 revert |
 | `recoverExcessStakingToken(to, amount)` | 只转出 `stakingToken.balanceOf(this) - totalSupply` 范围内的超额 stakingToken，发 `ExcessStakingTokenRecovered` | 非 owner、零地址、recipient 未允许、amount 为 0、amount 超额均 revert |
@@ -1193,12 +1108,12 @@ OZ `Ownable2Step` 会提供 ownership 相关事件。
 - 任意外部 token 转账失败的测试中，所有核心状态变量必须等于调用前快照。
 - `exit()` 成功路径不得触发嵌套 `nonReentrant`；`emergencyExit()` 必须和 `withdraw()` 同等级受重入保护。
 - `sweepUnallocatedRewards`、`recoverExcessStakingToken`、`recoverERC20` 必须受 `nonReentrant` 保护；`recoverERC20` 必须覆盖恶意 hook token 重入测试。
-- 模块级暂停验收必须能区分 `MODULE_STAKE` 暂停、`MODULE_REWARD_FUNDING` 暂停、owner lockdown 和 guardian 自己地址暂停的恢复权限。
+- 暂停验收必须证明全局 `paused()` 只限制新增风险入口：`stake` 和 `fundAndNotify` paused 时 revert，`withdraw/getReward/exit/emergencyExit` paused 时仍可执行。
 
 部署验收：
 
 - 构造参数和所有初始 view 返回值与部署报告一致。
-- 部署后未开启奖励周期时，`earned(anyUser) == 0`、`rewardPerToken() == 0`、`lastTimeRewardApplicable() == 0`、`ownerLockdown() == false`。
+- 部署后未开启奖励周期时，`earned(anyUser) == 0`、`rewardPerToken() == 0`、`lastTimeRewardApplicable() == 0`、`paused() == false`。
 - owner 已完成 `Ownable2Step` 交接，部署者 EOA 不再拥有 owner、rewardManager、guardian。
 - fork、testnet 或 dry-run 基础连通性检查 `fundAndNotify -> stake -> warp -> getReward -> exit` 通过，资金差额只允许整数 dust；生产部署后除非正式开启首轮奖励，不得执行该流程。
 
@@ -1228,14 +1143,14 @@ forge coverage
 部署后校验：
 
 - 查询所有构造参数 view，逐项匹配部署配置。
-- 查询初始状态：`periodFinish == 0`、`rewardRate == 0`、`totalSupply == 0`、`pendingUserDustScaled() == 0`、`accountedRewardBalance == 0`、`ownerLockdown() == false`。
+- 查询初始状态：`periodFinish == 0`、`rewardRate == 0`、`totalSupply == 0`、`pendingUserDustScaled() == 0`、`accountedRewardBalance == 0`、`paused() == false`。
 - 如果发生 ownership 交接，确认 `owner() == finalOwner` 且部署者 EOA 不再是 owner。
 - 确认部署者 EOA 不是 `rewardManager`，也不是 `guardian`，除非部署报告明确说明这是临时测试环境。
 - 确认 Treasury、rewardManager 和 recovery recipient 已按部署配置调用 `setSweepRecipientAllowed(..., true)`；如果某个地址不承担资金接收职责，部署报告必须明确记录跳过原因。
 - 查询 `sweepRecipientAllowed(treasury)`、`sweepRecipientAllowed(rewardManager)`、`sweepRecipientAllowed(recoveryRecipient)`，必须与部署配置一致。
 - 确认 `rewardManager` 已对 staking 合约完成 rewardToken allowance，或已经准备好通过资金管理合约调用。
 - 执行基础连通性 fork/testnet/dry-run 测试，覆盖 `fundAndNotify`、`stake`、`getReward`、`exit`；生产部署后不得把 `fundAndNotify` 当作无副作用 ping。
-- 执行一次 `pauseModule(MODULE_STAKE)` 和 `unpauseModule(MODULE_STAKE)` 测试 guardian 权限；生产主网可用 fork 或 testnet 演练，不建议主网随意暂停。
+- 执行一次 `pause(reasonHash)` 和 `unpause()` 测试暂停权限；生产主网可用 fork 或 testnet 演练，不建议主网随意暂停。
 
 角色安全交接：
 
