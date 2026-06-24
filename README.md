@@ -54,6 +54,8 @@
 - 只有 `owner` 可以调用 `unpause()`。恢复协议正常运行应由 owner、多签或 timelock 明确确认，guardian 不拥有恢复权限。
 - `pause(reasonHash)` 必须触发 OZ `Paused(operator)`，并额外发出 `PauseReason(operator, reasonHash)` 方便监控和事故追踪。
 - `unpause()` 使用 OZ `Unpaused(operator)`。
+- 权限检查优先于 paused 状态检查。`pause(reasonHash)` 必须先检查 `OnlyGuardianOrOwner`，再调用 OZ `_pause()`；`unpause()` 必须先执行 OZ `onlyOwner`，再调用 OZ `_unpause()`。
+- 如果权限错误和 paused 状态错误同时成立，必须优先返回权限错误：非 owner/guardian 在已 paused 时调用 `pause(reasonHash)` 仍 revert `OnlyGuardianOrOwner()`；非 owner 在未 paused 时调用 `unpause()` 仍 revert OZ owner error。
 
 paused 状态下禁止：
 
@@ -180,14 +182,11 @@ constructor(
 默认参数：
 
 ```text
-合约常量：
 MIN_REWARDS_DURATION = 1 days
 MAX_REWARDS_DURATION = 30 days
+default rewardsDuration = 7 days
 MAX_REWARD_AMOUNT = type(uint128).max
 MAX_REWARD_RATE = type(uint128).max
-
-部署脚本建议默认值：
-rewardsDuration = 7 days
 ```
 
 部署脚本必须显式传入 `initialOwner`，生产环境中 `initialOwner` 应为 Governance Timelock 或项目多签，不应让部署者 EOA 长期持有 owner。
@@ -1051,6 +1050,7 @@ OZ `Ownable2Step` 会提供 ownership 相关事件，OZ `Pausable` 会提供 `Pa
 - 只有 owner 可以调用 `unpause()`；guardian 调用 `unpause()` 必须以 OZ owner error revert。
 - 已 paused 时再次 `pause(reasonHash)` 必须按 OZ `Pausable` 标准错误 revert。
 - 未 paused 时调用 `unpause()` 必须按 OZ `Pausable` 标准错误 revert。
+- 当权限错误和 paused 状态错误同时成立时，必须先鉴权、后检查状态：非 owner/guardian 在已 paused 时调用 `pause(reasonHash)` 断言 `OnlyGuardianOrOwner()`；非 owner 在未 paused 时调用 `unpause()` 断言 OZ owner error。
 - paused 后 `stake/deposit` 必须 revert。
 - paused 后 `fundAndNotify` 必须 revert。
 - paused 后 `withdraw/getReward/exit/emergencyExit` 必须仍可执行。
@@ -1088,8 +1088,8 @@ OZ `Ownable2Step` 会提供 ownership 相关事件，OZ `Pausable` 会提供 `Pa
 | `setRewardManager(newManager)` | `rewardManager` 更新为 newManager，发 `RewardManagerUpdated(old,new)`，不改变当前奖励周期 | 非 owner 用 OZ owner error；零地址用 `ZeroAddress` |
 | `setGuardian(newGuardian)` | `guardian` 更新为 newGuardian，零地址表示禁用，发 `GuardianUpdated(old,new)` | 非 owner 用 OZ owner error |
 | `setSweepRecipientAllowed(recipient, allowed)` | `sweepRecipientAllowed[recipient] == allowed`，发 `SweepRecipientUpdated`；重复设置当前值也成功并发事件 | 非 owner用 OZ owner error；零地址用 `ZeroAddress` |
-| `pause(reasonHash)` | 全局 `paused() == true`；发 OZ `Paused` 和 `PauseReason` | 非 owner/guardian 用 `OnlyGuardianOrOwner`；已 paused 时用 OZ `EnforcedPause` |
-| `unpause()` | 全局 `paused() == false`；发 OZ `Unpaused` | 非 owner 用 OZ owner error；未 paused 时用 OZ `ExpectedPause` |
+| `pause(reasonHash)` | 全局 `paused() == true`；发 OZ `Paused` 和 `PauseReason` | 非 owner/guardian 用 `OnlyGuardianOrOwner`；已 paused 时授权 caller 用 OZ `EnforcedPause`；非 owner/guardian 且已 paused 时优先 `OnlyGuardianOrOwner` |
+| `unpause()` | 全局 `paused() == false`；发 OZ `Unpaused` | 非 owner 用 OZ owner error；未 paused 时 owner 用 OZ `ExpectedPause`；非 owner 且未 paused 时优先 OZ owner error |
 | `syncUnallocatedRewards()` | 将 `rewardToken.balanceOf(this) - accountedRewardBalance` 加入 `unallocatedRewards` 和 `accountedRewardBalance`，发 `UnallocatedRewardsSynced` | 无未入账余额时 `NoUnaccountedRewards` revert |
 | `sweepUnallocatedRewards(to, amount)` | 先 checkpoint；允许 amount 最大为调用前 `sweepableUnallocatedRewards()`；只减少 checkpoint 后的 `unallocatedRewards` 和 `accountedRewardBalance`，用户本金和奖励不变，发 `UnallocatedRewardsSwept`；前置 checkpoint 产生空池 forfeited 时发 `RewardsForfeited`；有质押的前置 checkpoint 不得发 `RewardPerTokenDust` | 非 owner、to 不允许、amount 为 0、amount 超过 checkpoint 后 `unallocatedRewards` 均 revert |
 | `recoverExcessStakingToken(to, amount)` | 只转出 `stakingToken.balanceOf(this) - totalSupply` 范围内的超额 stakingToken，发 `ExcessStakingTokenRecovered` | 非 owner、零地址、recipient 未允许、amount 为 0、amount 超额均 revert |
