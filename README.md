@@ -180,11 +180,14 @@ constructor(
 默认参数：
 
 ```text
+合约常量：
 MIN_REWARDS_DURATION = 1 days
 MAX_REWARDS_DURATION = 30 days
-default rewardsDuration = 7 days
 MAX_REWARD_AMOUNT = type(uint128).max
 MAX_REWARD_RATE = type(uint128).max
+
+部署脚本建议默认值：
+rewardsDuration = 7 days
 ```
 
 部署脚本必须显式传入 `initialOwner`，生产环境中 `initialOwner` 应为 Governance Timelock 或项目多签，不应让部署者 EOA 长期持有 owner。
