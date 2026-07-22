@@ -1,0 +1,18 @@
+# Deployment Records
+
+## Sepolia - 2026-07-22
+
+Deployer:
+0xf3F11aA7c3eb36765492F692B9738852CeB0A0E9
+
+Staking Token:
+0xd27c60c93C04a8eCC79077f3Bf0e47e4b4a4340f
+
+Reward Token:
+0x22130C84150f27d909F1f913AC5e9E43662870D6
+
+StakingRewards:
+0xf7486c9893Bf266366655AC0bea41B156b6cC2Cb
+
+Network:
+Sepolia
