@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {SafeERC20} from"@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -19,18 +19,18 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-// -------------------------------------------------------------------------
-// State
-// -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // State
+    // -------------------------------------------------------------------------
     /// @notice Token deposited by users for staking.
     IERC20 public immutable stakingToken;
-    
+
     /// @notice Token distributed to stakers as rewards.
     IERC20 public immutable rewardToken;
 
     /// @notice Address authorized to fund and notify new reward distributions.
     address public rewardManager;
-    
+
     /// @notice Address authorized to pause high-risk operations in emergencies.
     address public guardian;
 
@@ -97,9 +97,9 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
     /// @notice Mapping of sweep recipients to their allowance status.
     mapping(address => bool) public sweepRecipientAllowed;
 
-// -------------------------------------------------------------------------
-// Errors
-// -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Errors
+    // -------------------------------------------------------------------------
     error ZeroAddress();
     error ZeroAmount();
     error SameToken();
@@ -123,10 +123,9 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
     error NoUnaccountedRewards();
     error OnlyOwner();
 
-
-// -------------------------------------------------------------------------
-// Events
-// -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Events
+    // -------------------------------------------------------------------------
     /// @notice Emitted when a user stakes tokens.
     event Staked(address indexed user, uint256 amount);
 
@@ -141,15 +140,14 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
 
     /// @notice Emitted when the reward manager funds a new reward period.
     event RewardAdded(address indexed rewardManager, uint256 amount, uint256 rewardRate, uint256 periodFinish);
-    
-    
+
     event RewardsForfeited(uint256 indexed startTime, uint256 indexed endTime, uint256 amount);
     event RewardPerTokenDust(uint256 amount);
     event UserCheckpointDust(address indexed user, uint256 amount);
     event UnallocatedRewardsSwept(
         address indexed operator, address indexed to, uint256 amount, uint256 remainingUnallocated
     );
-    
+
     event UnallocatedRewardsSynced(address indexed operator, uint256 amount, uint256 newUnallocated);
     event ExcessStakingTokenRecovered(
         address indexed operator, address indexed to, uint256 amount, uint256 remainingExcess
@@ -165,7 +163,6 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
 
     /*---------------------------- modifier ----------------------------- */
 
-
     modifier updateReward(address account) {
         _updateGlobalReward();
         if (account != address(0)) {
@@ -179,21 +176,24 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         _;
     }
 
-
     /*------------------------- constructor ----------------------------- */
     constructor(
         address initialOwner,
         address stakingToken_,
-        address rewardToken_, 
+        address rewardToken_,
         address rewardManager_,
         address guardian_,
         uint256 rewardsDuration_
-        )Ownable(initialOwner){
-        
-        if (initialOwner ==address(0) || rewardToken_ == address(0) || stakingToken_ == address(0)|| rewardManager_ == address(0)) revert ZeroAddress();
+    ) Ownable(initialOwner) {
+        if (
+            initialOwner == address(0) || rewardToken_ == address(0) || stakingToken_ == address(0)
+                || rewardManager_ == address(0)
+        ) revert ZeroAddress();
         if (rewardToken_ == stakingToken_) revert SameToken();
-        if (rewardsDuration_ < MIN_REWARDS_DURATION || rewardsDuration_ > MAX_REWARDS_DURATION) revert InvalidRewardsDuration();
-        
+        if (rewardsDuration_ < MIN_REWARDS_DURATION || rewardsDuration_ > MAX_REWARDS_DURATION) {
+            revert InvalidRewardsDuration();
+        }
+
         rewardToken = IERC20(rewardToken_);
         stakingToken = IERC20(stakingToken_);
         rewardManager = rewardManager_;
@@ -217,10 +217,8 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         balanceOf[msg.sender] += amount;
 
         emit Staked(msg.sender, amount);
-
     }
 
-    
     /**
      * @notice Withdraw staked tokens.
      * @dev Checkpoints the caller's rewards before reducing principal, so the user
@@ -229,7 +227,6 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
      */
     function withdraw(uint256 amount) external nonReentrant updateReward(msg.sender) {
         _withdraw(msg.sender, amount);
-        
     }
 
     /**
@@ -238,7 +235,6 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
      */
     function getReward() external nonReentrant updateReward(msg.sender) {
         _getReward(msg.sender);
-        
     }
 
     /**
@@ -313,20 +309,14 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 roundingDust = grossRewards - newScheduledRewards;
 
         uint256 availableForThisSchedule = receivedReward + leftover;
-        uint256 reservedRewards = 
-            aggregateClaimableRewards 
-            + accruedRewardReserve 
-            + unallocatedRewards;
+        uint256 reservedRewards = aggregateClaimableRewards + accruedRewardReserve + unallocatedRewards;
 
         uint256 postAccountedBalance = accountedRewardBalance + receivedReward;
-        if(postAccountedBalance < reservedRewards + newScheduledRewards + roundingDust) {
-            revert InsufficientRewardBalance(
-                reservedRewards + newScheduledRewards + roundingDust, 
-                postAccountedBalance
-            );
+        if (postAccountedBalance < reservedRewards + newScheduledRewards + roundingDust) {
+            revert InsufficientRewardBalance(reservedRewards + newScheduledRewards + roundingDust, postAccountedBalance);
         }
 
-        if(newScheduledRewards > availableForThisSchedule) {
+        if (newScheduledRewards > availableForThisSchedule) {
             revert InsufficientRewardBalance(newScheduledRewards, availableForThisSchedule);
         }
 
@@ -343,11 +333,10 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
     function setRewardsDuration(uint256 newDuration) external onlyOwner {
         if (newDuration < MIN_REWARDS_DURATION || newDuration > MAX_REWARDS_DURATION) revert InvalidRewardsDuration();
         if (periodFinish > block.timestamp) revert RewardPeriodActive();
-        
+
         uint256 oldDuration = rewardsDuration;
         rewardsDuration = newDuration;
         emit RewardsDurationUpdated(oldDuration, newDuration);
-        
     }
 
     function setRewardManager(address newManager) external onlyOwner {
@@ -376,11 +365,11 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         revert RenounceOwnershipDisabled();
     }
 
-    function pause(bytes32 reasonHash) public  {
-        if(msg.sender != guardian && msg.sender != owner()) {
+    function pause(bytes32 reasonHash) public {
+        if (msg.sender != guardian && msg.sender != owner()) {
             revert OnlyGuardianOrOwner();
         }
-        if(paused()) revert EnforcedPause();
+        if (paused()) revert EnforcedPause();
 
         _pause();
 
@@ -408,13 +397,17 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         emit UnallocatedRewardsSynced(msg.sender, unaccountedRewardBalance, unallocatedRewards);
     }
 
-
     /**
      * @notice Sweep unallocated reward tokens to an approved recipient.
      * @dev Only the owner can sweep, and the recipient must be allowlisted.
      *      Active user principal and claimable rewards must not be affected.
      */
-    function sweepUnallocatedRewards(address to, uint256 amount) external nonReentrant onlyOwner updateReward(address(0)) {
+    function sweepUnallocatedRewards(address to, uint256 amount)
+        external
+        nonReentrant
+        onlyOwner
+        updateReward(address(0))
+    {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
         if (to != address(0) && sweepRecipientAllowed[to] == false) revert InvalidSweepRecipient(to);
@@ -436,9 +429,8 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         if (amount == 0) revert ZeroAmount();
         if (to != address(0) && sweepRecipientAllowed[to] == false) revert InvalidSweepRecipient(to);
 
-        
         uint256 excess = stakingToken.balanceOf(address(this)) - totalStaked;
-        if(amount > excess) revert InsufficientExcessStakingToken(amount, excess);
+        if (amount > excess) revert InsufficientExcessStakingToken(amount, excess);
         uint256 remainingExcess = excess - amount;
 
         stakingToken.safeTransfer(to, amount);
@@ -448,7 +440,7 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
     function recoverERC20(address token, address to, uint256 amount) external nonReentrant onlyOwner {
         if (to == address(0) || token == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
-        if (token == address(stakingToken)|| token == address(rewardToken)) revert CannotRecoverCoreToken(token);
+        if (token == address(stakingToken) || token == address(rewardToken)) revert CannotRecoverCoreToken(token);
         if (sweepRecipientAllowed[to] == false) revert InvalidSweepRecipient(to);
 
         IERC20 recoverToken = IERC20(token);
@@ -456,50 +448,47 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         emit ERC20Recovered(msg.sender, token, to, amount);
     }
 
-
     // ===================================== view functions===============================
     /**
-    * @notice Returns the timestamp up to which rewards should be accrued.
-    * @dev Caps reward accrual at `periodFinish` so rewards do not continue
-    *      accumulating after the current reward period ends. Returns zero before
-    *      the first reward period is initialized.
-    * @return The applicable reward accounting timestamp.
-    */
+     * @notice Returns the timestamp up to which rewards should be accrued.
+     * @dev Caps reward accrual at `periodFinish` so rewards do not continue
+     *      accumulating after the current reward period ends. Returns zero before
+     *      the first reward period is initialized.
+     * @return The applicable reward accounting timestamp.
+     */
     function lastTimeRewardApplicable() public view returns (uint256) {
         return periodFinish == 0 ? 0 : Math.min(block.timestamp, periodFinish);
     }
 
     /**
-    * @notice Returns the current accumulated reward per staked token.
-    * @dev This is a view-only simulation of the global reward checkpoint. It includes
-    *      rewards released since `lastUpdateTime`, but does not update contract state.
-    *      The returned value is scaled by 1e18.
-    * @return rewardPerToken_ The accumulated reward per staked token, scaled by 1e18.
-    */
+     * @notice Returns the current accumulated reward per staked token.
+     * @dev This is a view-only simulation of the global reward checkpoint. It includes
+     *      rewards released since `lastUpdateTime`, but does not update contract state.
+     *      The returned value is scaled by 1e18.
+     * @return rewardPerToken_ The accumulated reward per staked token, scaled by 1e18.
+     */
     function rewardPerToken() public view returns (uint256 rewardPerToken_) {
-        if(totalStaked == 0) {
+        if (totalStaked == 0) {
             rewardPerToken_ = rewardPerTokenStored;
-        } 
-        else {
-            uint256 pendingReleased = Math.min((lastTimeRewardApplicable() - lastUpdateTime) * rewardRate , scheduledRewards);
-            rewardPerToken_ = rewardPerTokenStored 
-                + Math.mulDiv(pendingReleased , 1e18 , totalStaked);
+        } else {
+            uint256 pendingReleased =
+                Math.min((lastTimeRewardApplicable() - lastUpdateTime) * rewardRate, scheduledRewards);
+            rewardPerToken_ = rewardPerTokenStored + Math.mulDiv(pendingReleased, 1e18, totalStaked);
         }
 
         return rewardPerToken_;
     }
 
     /**
-    * @notice Returns the total rewards currently earned by a user.
-    * @dev Includes both rewards already checkpointed to `rewards[user]` and rewards
-    *      accrued since the user's last reward-per-token checkpoint.
-    * @param user The account to query.
-    * @return earned_ The user's earned reward amount in reward token units.
-    */
+     * @notice Returns the total rewards currently earned by a user.
+     * @dev Includes both rewards already checkpointed to `rewards[user]` and rewards
+     *      accrued since the user's last reward-per-token checkpoint.
+     * @param user The account to query.
+     * @return earned_ The user's earned reward amount in reward token units.
+     */
     function earned(address user) public view returns (uint256 earned_) {
-        if(user == address(0)) return 0;
-        earned_ = Math.mulDiv(balanceOf[user] , rewardPerToken() - userRewardPerTokenPaid[user] , 1e18) 
-            + rewards[user];
+        if (user == address(0)) return 0;
+        earned_ = Math.mulDiv(balanceOf[user], rewardPerToken() - userRewardPerTokenPaid[user], 1e18) + rewards[user];
         return earned_;
     }
 
@@ -519,12 +508,11 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
      */
     function sweepableUnallocatedRewards() public view returns (uint256) {
         uint256 sweepable;
-        uint256 pendingReleased = Math.min((lastTimeRewardApplicable() - lastUpdateTime) * rewardRate , scheduledRewards);
+        uint256 pendingReleased = Math.min((lastTimeRewardApplicable() - lastUpdateTime) * rewardRate, scheduledRewards);
 
         if (totalStaked == 0) {
             sweepable = unallocatedRewards + pendingReleased;
-        }
-        else {
+        } else {
             sweepable = unallocatedRewards;
         }
 
@@ -540,35 +528,32 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         return periodFinish > block.timestamp;
     }
 
-
     // ================================== internal functions ==================================
-  
+
     /**
      * @dev Updates global reward accounting up to the current applicable timestamp.
      *      If no stakers exist, released rewards become unallocated. Otherwise, released
      *      rewards increase 'rewardPerTokenStored' and are held in 'accruedRewardReserve'
      */
     function _updateGlobalReward() internal {
-        if(lastTimeRewardApplicable() <= lastUpdateTime) return;
+        if (lastTimeRewardApplicable() <= lastUpdateTime) return;
 
         uint256 elapsed = lastTimeRewardApplicable() - lastUpdateTime;
-        uint256 released = Math.min(elapsed * rewardRate , scheduledRewards);
-        scheduledRewards -= released; 
+        uint256 released = Math.min(elapsed * rewardRate, scheduledRewards);
+        scheduledRewards -= released;
 
-        if(totalStaked == 0) {
+        if (totalStaked == 0) {
             if (released > 0) {
                 unallocatedRewards += released;
                 emit RewardsForfeited(lastUpdateTime, lastTimeRewardApplicable(), released);
-            } 
-        }
-        else {
-            uint256 rewardPerTokenIncrement = Math.mulDiv(released , 1e18 , totalStaked);
+            }
+        } else {
+            uint256 rewardPerTokenIncrement = Math.mulDiv(released, 1e18, totalStaked);
             rewardPerTokenStored = rewardPerTokenStored + rewardPerTokenIncrement;
             accruedRewardReserve += released;
         }
 
         lastUpdateTime = lastTimeRewardApplicable();
-
     }
 
     /**
@@ -577,7 +562,7 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
      *      and eventually moved into 'unallocatedRewards'.
      */
     function _updateUserReward(address account) internal {
-        if(account == address(0)) revert ZeroAddress();
+        if (account == address(0)) revert ZeroAddress();
         uint256 rptDelta = rewardPerTokenStored - userRewardPerTokenPaid[account];
         uint256 raw = balanceOf[account] * rptDelta;
         uint256 delta = raw / 1e18;
@@ -599,12 +584,11 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         }
 
         userRewardPerTokenPaid[account] = rewardPerTokenStored;
-
     }
 
     function _withdraw(address user, uint256 amount) internal {
         if (amount == 0) revert ZeroAmount();
-        if(amount > balanceOf[user]) revert InsufficientStake(amount, balanceOf[user]);
+        if (amount > balanceOf[user]) revert InsufficientStake(amount, balanceOf[user]);
 
         totalStaked -= amount;
         balanceOf[user] -= amount;
@@ -619,17 +603,17 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
     function _getReward(address user) internal {
         uint256 reward = rewards[user];
 
-        if(reward == 0){
+        if (reward == 0) {
             return;
-        } 
+        }
         rewards[user] = 0;
         aggregateClaimableRewards -= reward;
         accountedRewardBalance -= reward;
-         
+
         rewardToken.safeTransfer(user, reward);
 
-        emit RewardPaid(user, reward); 
-    } 
+        emit RewardPaid(user, reward);
+    }
 
     function _flushAccruedRewardReserveIfNoStakers() internal {
         if (totalStaked == 0) {
@@ -641,9 +625,8 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
                 emit RewardPerTokenDust(dust);
             }
             pendingUserDustScaled = 0;
-
+        } else {
+            return;
         }
-        else return;
-
     }
 }

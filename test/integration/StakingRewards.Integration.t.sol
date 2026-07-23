@@ -6,7 +6,7 @@ import {StakingRewards} from "../../src/StakingRewards.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {FeeOnTransferMock} from "../mocks/FeeOnTransferMock.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol"; 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract StakingRewardsIntegrationTest is Test {
     StakingRewards public stakingRewards;
@@ -22,22 +22,16 @@ contract StakingRewardsIntegrationTest is Test {
     uint256 public constant MIN_REWARDS_DURATION = 1 days;
     uint256 public constant MAX_REWARDS_DURATION = 365 days;
     address public treasury = makeAddr("treasury");
-    address public recoveryRecipient = makeAddr("recoveryRecipient"); 
+    address public recoveryRecipient = makeAddr("recoveryRecipient");
     address public alice = makeAddr("alice");
     address public bob = makeAddr("bob");
     address public carol = makeAddr("carol");
-
 
     function setUp() public {
         stakingToken = new MockERC20("StakingToken", "STAKING", 18);
         rewardToken = new MockERC20("Reward Token", "REWARD", 18);
         stakingRewards = new StakingRewards(
-            initialOwner,
-            address(stakingToken),
-            address(rewardToken),
-            rewardManager,
-            guardian,
-            REWARD_DURATION
+            initialOwner, address(stakingToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
         );
     }
 
@@ -53,10 +47,10 @@ contract StakingRewardsIntegrationTest is Test {
         vm.prank(alice);
         stakingRewards.exit();
 
-        assertEq (stakingToken.balanceOf(alice), stakeAmount);
-        assertEq (stakingRewards.totalStaked(), 0);
-        assertEq (stakingRewards.balanceOf(alice), 0);
-        assertEq (rewardToken.balanceOf(alice), REWARD_DURATION); 
+        assertEq(stakingToken.balanceOf(alice), stakeAmount);
+        assertEq(stakingRewards.totalStaked(), 0);
+        assertEq(stakingRewards.balanceOf(alice), 0);
+        assertEq(rewardToken.balanceOf(alice), REWARD_DURATION);
     }
 
     function test_Integration_MultipleUsers_StaggeredStakeWithdrawClaim() public {
@@ -89,22 +83,22 @@ contract StakingRewardsIntegrationTest is Test {
         vm.prank(carol);
         stakingRewards.exit();
 
-        assertEq (stakingToken.balanceOf(alice), stakeAmountAlice);
-        assertEq (stakingToken.balanceOf(bob), stakeAmountBob);
-        assertEq (stakingToken.balanceOf(carol), stakeAmountCarol);
+        assertEq(stakingToken.balanceOf(alice), stakeAmountAlice);
+        assertEq(stakingToken.balanceOf(bob), stakeAmountBob);
+        assertEq(stakingToken.balanceOf(carol), stakeAmountCarol);
 
-        assertEq (stakingRewards.totalStaked(), 0);
-        assertEq (stakingRewards.balanceOf(alice), 0);
-        assertEq (stakingRewards.balanceOf(bob), 0);
-        assertEq (stakingRewards.balanceOf(carol), 0);
+        assertEq(stakingRewards.totalStaked(), 0);
+        assertEq(stakingRewards.balanceOf(alice), 0);
+        assertEq(stakingRewards.balanceOf(bob), 0);
+        assertEq(stakingRewards.balanceOf(carol), 0);
 
-        assertEq (stakingRewards.rewards(alice), 0);
-        assertEq (stakingRewards.rewards(bob), 0);
-        assertEq (stakingRewards.rewards(carol), 0); 
+        assertEq(stakingRewards.rewards(alice), 0);
+        assertEq(stakingRewards.rewards(bob), 0);
+        assertEq(stakingRewards.rewards(carol), 0);
 
-        assertGt (rewardToken.balanceOf(alice), 0); 
-        assertGt (rewardToken.balanceOf(bob), 0); 
-        assertGt (rewardToken.balanceOf(carol), 0);   
+        assertGt(rewardToken.balanceOf(alice), 0);
+        assertGt(rewardToken.balanceOf(bob), 0);
+        assertGt(rewardToken.balanceOf(carol), 0);
     }
 
     function test_Integration_StakeWithdrawStakeAgain_EarnsSegmentedRewards() public {
@@ -118,13 +112,13 @@ contract StakingRewardsIntegrationTest is Test {
         vm.warp(block.timestamp + elapsed);
         vm.prank(alice);
         stakingRewards.withdraw(stakeAmount);
-        assertEq (stakingRewards.earned(alice), elapsed);
+        assertEq(stakingRewards.earned(alice), elapsed);
 
         vm.warp(block.timestamp + elapsed);
         _stake(alice, stakeAmount);
 
         vm.warp(block.timestamp + elapsed);
-        assertEq (stakingRewards.earned(alice), elapsed * 2);
+        assertEq(stakingRewards.earned(alice), elapsed * 2);
     }
 
     function test_Integration_StakeWithdrawSequence_TracksTotalStakedAndBalance() public {
@@ -133,22 +127,22 @@ contract StakingRewardsIntegrationTest is Test {
         uint256 elapsed = 100;
 
         _stake(alice, stakeAmount);
-        assertEq (stakingRewards.totalStaked(), stakeAmount);
-        assertEq (stakingRewards.balanceOf(alice), stakeAmount);
-        assertEq (stakingToken.balanceOf(alice), 0);
+        assertEq(stakingRewards.totalStaked(), stakeAmount);
+        assertEq(stakingRewards.balanceOf(alice), stakeAmount);
+        assertEq(stakingToken.balanceOf(alice), 0);
 
         vm.warp(block.timestamp + elapsed);
         vm.prank(alice);
         stakingRewards.withdraw(withdrawAmount);
-        assertEq (stakingRewards.totalStaked(), 0);
-        assertEq (stakingRewards.balanceOf(alice), 0);
-        assertEq (stakingToken.balanceOf(alice), stakeAmount);
+        assertEq(stakingRewards.totalStaked(), 0);
+        assertEq(stakingRewards.balanceOf(alice), 0);
+        assertEq(stakingToken.balanceOf(alice), stakeAmount);
 
         vm.warp(block.timestamp + elapsed);
         _stake(alice, stakeAmount);
-        assertEq (stakingRewards.totalStaked(), stakeAmount);
-        assertEq (stakingRewards.balanceOf(alice), stakeAmount);
-        assertEq (stakingToken.balanceOf(alice), 1000);
+        assertEq(stakingRewards.totalStaked(), stakeAmount);
+        assertEq(stakingRewards.balanceOf(alice), stakeAmount);
+        assertEq(stakingToken.balanceOf(alice), 1000);
     }
 
     function test_Integration_MidPeriodTopUp_UsesLeftoverAndContinuesRewards() public {
@@ -166,11 +160,11 @@ contract StakingRewardsIntegrationTest is Test {
         uint256 expectedScheduledRewards = stakingRewards.rewardRate() * REWARD_DURATION;
         uint256 expectedUnallocatedRewards = rewardAmount / 2;
 
-        assertEq (stakingRewards.accountedRewardBalance(), expectedAccountedRewardBalance);
-        assertEq (stakingRewards.scheduledRewards(), expectedScheduledRewards);
-        assertEq (stakingRewards.unallocatedRewards(), expectedUnallocatedRewards);
-        assertEq (stakingRewards.rewardRate(), expectedRewardRate);
-        assertEq (stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
+        assertEq(stakingRewards.accountedRewardBalance(), expectedAccountedRewardBalance);
+        assertEq(stakingRewards.scheduledRewards(), expectedScheduledRewards);
+        assertEq(stakingRewards.unallocatedRewards(), expectedUnallocatedRewards);
+        assertEq(stakingRewards.rewardRate(), expectedRewardRate);
+        assertEq(stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
     }
 
     function test_Integration_EmptyPoolThenStake_DoesNotReceivePastRewards() public {
@@ -197,7 +191,7 @@ contract StakingRewardsIntegrationTest is Test {
         _stake(alice, stakeAmount);
         vm.warp(block.timestamp + elapsed);
 
-        assertEq (stakingRewards.earned(alice), rewardAmount * elapsed / REWARD_DURATION);
+        assertEq(stakingRewards.earned(alice), rewardAmount * elapsed / REWARD_DURATION);
     }
 
     function test_Integration_PauseUsersCanStillWithdrawClaimExitEmergencyExit() public {
@@ -219,24 +213,24 @@ contract StakingRewardsIntegrationTest is Test {
         stakingRewards.getReward();
         stakingRewards.withdraw(withdrawAmount);
         vm.stopPrank();
-        assertEq (stakingRewards.totalStaked(), 2 * stakeAmount);
-        assertEq (stakingRewards.balanceOf(alice), 0);
-        assertEq (stakingToken.balanceOf(alice), withdrawAmount);
-        assertEq (rewardToken.balanceOf(alice), elapsed);
+        assertEq(stakingRewards.totalStaked(), 2 * stakeAmount);
+        assertEq(stakingRewards.balanceOf(alice), 0);
+        assertEq(stakingToken.balanceOf(alice), withdrawAmount);
+        assertEq(rewardToken.balanceOf(alice), elapsed);
 
         vm.prank(bob);
         stakingRewards.exit();
-        assertEq (stakingRewards.totalStaked(), stakeAmount);
-        assertEq (stakingRewards.balanceOf(bob), 0);
-        assertEq (stakingToken.balanceOf(bob), stakeAmount);
-        assertEq (rewardToken.balanceOf(bob), elapsed);
+        assertEq(stakingRewards.totalStaked(), stakeAmount);
+        assertEq(stakingRewards.balanceOf(bob), 0);
+        assertEq(stakingToken.balanceOf(bob), stakeAmount);
+        assertEq(rewardToken.balanceOf(bob), elapsed);
 
         vm.prank(carol);
         stakingRewards.emergencyExit();
-        assertEq (stakingRewards.totalStaked(), 0);
-        assertEq (stakingRewards.balanceOf(carol), 0);
-        assertEq (stakingToken.balanceOf(carol), stakeAmount);
-        assertEq (rewardToken.balanceOf(carol), 0);
+        assertEq(stakingRewards.totalStaked(), 0);
+        assertEq(stakingRewards.balanceOf(carol), 0);
+        assertEq(stakingToken.balanceOf(carol), stakeAmount);
+        assertEq(rewardToken.balanceOf(carol), 0);
     }
 
     function test_Integration_EmergencyExitForfeitsThenOwnerSweeps() public {
@@ -244,7 +238,7 @@ contract StakingRewardsIntegrationTest is Test {
         uint256 rewardAmount = REWARD_DURATION;
         uint256 elapsed = 100;
 
-        _stake(alice,stakeAmount);
+        _stake(alice, stakeAmount);
         _fundAndNotify(rewardAmount);
 
         vm.warp(block.timestamp + elapsed);
@@ -256,7 +250,7 @@ contract StakingRewardsIntegrationTest is Test {
         stakingRewards.setSweepRecipientAllowed(treasury, true);
         stakingRewards.sweepUnallocatedRewards(treasury, forfeitedReward);
         vm.stopPrank();
-        assertEq (rewardToken.balanceOf(treasury), forfeitedReward);
+        assertEq(rewardToken.balanceOf(treasury), forfeitedReward);
     }
 
     function test_Integration_DonatedRewardToken_SyncThenSweeps() public {
@@ -275,8 +269,8 @@ contract StakingRewardsIntegrationTest is Test {
         stakingRewards.sweepUnallocatedRewards(treasury, donation);
         vm.stopPrank();
 
-        assertEq (rewardToken.balanceOf(treasury), donation);
-        assertEq (stakingRewards.accountedRewardBalance(), rewardAmount);
+        assertEq(rewardToken.balanceOf(treasury), donation);
+        assertEq(stakingRewards.accountedRewardBalance(), rewardAmount);
     }
 
     function test_Integration_ExcessStakingToken_RecoverDoesNotAffectUserPrincipal() public {
@@ -290,10 +284,10 @@ contract StakingRewardsIntegrationTest is Test {
         stakingRewards.recoverExcessStakingToken(recoveryRecipient, excessAmount);
         vm.stopPrank();
 
-        assertEq (stakingToken.balanceOf(recoveryRecipient), excessAmount);
-        assertEq (stakingToken.balanceOf(alice), 0);
-        assertEq (stakingRewards.totalStaked(), stakeAmount);
-        assertEq (stakingRewards.balanceOf(alice), stakeAmount);
+        assertEq(stakingToken.balanceOf(recoveryRecipient), excessAmount);
+        assertEq(stakingToken.balanceOf(alice), 0);
+        assertEq(stakingRewards.totalStaked(), stakeAmount);
+        assertEq(stakingRewards.balanceOf(alice), stakeAmount);
     }
 
     function test_Integration_SetRewardManagerDuringActivePeriod_OldLosesNewCanFund() public {
@@ -306,7 +300,7 @@ contract StakingRewardsIntegrationTest is Test {
         address oldManager = stakingRewards.rewardManager();
         vm.prank(initialOwner);
         stakingRewards.setRewardManager(newManager);
-        assertEq (stakingRewards.rewardManager(), newManager);
+        assertEq(stakingRewards.rewardManager(), newManager);
 
         rewardToken.mint(oldManager, rewardAmount);
         vm.startPrank(oldManager);
@@ -321,16 +315,11 @@ contract StakingRewardsIntegrationTest is Test {
         vm.stopPrank();
     }
 
-    function test_Integration_LongAfterPeriodFinish_NewFundingDoesNotUseHistoricalBalance() public {
-    }
+    function test_Integration_LongAfterPeriodFinish_NewFundingDoesNotUseHistoricalBalance() public {}
 
-    function test_Integration_WhenPaused_OwnerCanRunSafetyOperations() public {
+    function test_Integration_WhenPaused_OwnerCanRunSafetyOperations() public {}
 
-    }
-
-    function test_Integration_multipleTopUpAcrossPeriods_UsesLeftoverCorrectly() public {
-
-    }
+    function test_Integration_multipleTopUpAcrossPeriods_UsesLeftoverCorrectly() public {}
 
     function test_Integration_DonationSyncSweep_DoesNotAffectUserClaimableRewards() public {
         uint256 stakeAmount = 1000;
@@ -351,8 +340,8 @@ contract StakingRewardsIntegrationTest is Test {
 
         vm.prank(alice);
         stakingRewards.getReward();
-        assertEq (rewardToken.balanceOf(alice), elapsed);
-        assertEq (stakingRewards.accountedRewardBalance(), rewardAmount - elapsed);
+        assertEq(rewardToken.balanceOf(alice), elapsed);
+        assertEq(stakingRewards.accountedRewardBalance(), rewardAmount - elapsed);
     }
 
     // =====================================internal functions ==========================
@@ -372,5 +361,4 @@ contract StakingRewardsIntegrationTest is Test {
         stakingRewards.fundAndNotify(amount);
         vm.stopPrank();
     }
-
 }

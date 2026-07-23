@@ -23,115 +23,75 @@ contract StakingRewardsInvariantTest is Test {
     uint256 public constant MIN_REWARDS_DURATION = 1 days;
     uint256 public constant MAX_REWARDS_DURATION = 365 days;
     address public treasury = makeAddr("treasury");
-    address public recoveryRecipient = makeAddr("recoveryRecipient"); 
+    address public recoveryRecipient = makeAddr("recoveryRecipient");
     address public alice = makeAddr("alice");
 
     function setUp() public {
         stakingToken = new MockERC20("Staking Token", "STAKING", 18);
         rewardToken = new MockERC20("Reward Token", "REWARD", 18);
         stakingRewards = new StakingRewards(
-            initialOwner,
-            address(stakingToken),
-            address(rewardToken),
-            rewardManager,
-            guardian,
-            REWARD_DURATION
+            initialOwner, address(stakingToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
         );
 
         handler = new StakingRewardsHandler(
-            stakingRewards,
-            stakingToken,
-            rewardToken,
-            rewardManager,
-            initialOwner,
-            recoveryRecipient
+            stakingRewards, stakingToken, rewardToken, rewardManager, initialOwner, recoveryRecipient
         );
 
         targetContract(address(handler));
-
     }
 
-
     function invariant_RewardAccountingBucketsSumAccountedBalance() public view {
-        assertEq (
+        assertEq(
             stakingRewards.accountedRewardBalance(),
-            stakingRewards.aggregateClaimableRewards()
-            + stakingRewards.accruedRewardReserve()
-            + stakingRewards.scheduledRewards()
-            + stakingRewards.unallocatedRewards()
+            stakingRewards.aggregateClaimableRewards() + stakingRewards.accruedRewardReserve()
+                + stakingRewards.scheduledRewards() + stakingRewards.unallocatedRewards()
         );
     }
 
     function invariant_AccountedPlusUnreservedEqualsRewardTokenBalance() public view {
-        assertEq (
-            stakingRewards.accountedRewardBalance()
-            + stakingRewards.unreservedRewardBalance(),
+        assertEq(
+            stakingRewards.accountedRewardBalance() + stakingRewards.unreservedRewardBalance(),
             rewardToken.balanceOf(address(stakingRewards))
         );
     }
 
     function invariant_AccountedRewardBalanceNeverExceedsRewardTokenBalance() public view {
-        assertLe (
-            stakingRewards.accountedRewardBalance(),
-            rewardToken.balanceOf(address(stakingRewards))
-        );
+        assertLe(stakingRewards.accountedRewardBalance(), rewardToken.balanceOf(address(stakingRewards)));
     }
 
     function invariant_StakingTokenBalanceAlwaysCoversTotalStaked() public view {
-        assertGe (
-            stakingToken.balanceOf(address(stakingRewards)),
-            stakingRewards.totalStaked()
-        );
+        assertGe(stakingToken.balanceOf(address(stakingRewards)), stakingRewards.totalStaked());
     }
 
     function invariant_TotalStakedEqualsSumUserBalances() public view {
-        assertEq (
-            stakingRewards.totalStaked(),
-            handler.ghostStakes() - handler.ghostWithdraws()
-        );
+        assertEq(stakingRewards.totalStaked(), handler.ghostStakes() - handler.ghostWithdraws());
     }
 
     function invariant_AggregateClaimableEqualsSumUserRewards() public view {
         uint256 sumRewards;
-        for(uint256 i = 0; i < handler.actorCount(); i++) {
-            address actor = handler.actors(i); 
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            address actor = handler.actors(i);
             sumRewards += stakingRewards.rewards(actor);
         }
-        assertEq (
-            stakingRewards.aggregateClaimableRewards(),
-            sumRewards
-        );
+        assertEq(stakingRewards.aggregateClaimableRewards(), sumRewards);
     }
 
     function invariant_PendingUserDustScaledLessThanOneE18() public view {
-        assertLt (
-            stakingRewards.pendingUserDustScaled(),
-            1e18
-        );
+        assertLt(stakingRewards.pendingUserDustScaled(), 1e18);
     }
 
     function invariant_TotalClaimedNeverExceedsTotalFundedMinusSwept() public view {
         uint256 totalAccountedIn = handler.ghostFunds() + handler.ghostSynced();
-        assertLe (handler.ghostSwept(), totalAccountedIn);
-        assertLe (handler.ghostClaimed(), totalAccountedIn - handler.ghostSwept());
+        assertLe(handler.ghostSwept(), totalAccountedIn);
+        assertLe(handler.ghostClaimed(), totalAccountedIn - handler.ghostSwept());
     }
 
     function invariant_SweepNeverReducesUserPrincipalOrClaimableRewards() public view {
-        assertEq (
-            handler.ghostPrincipalAfterSweep(),
-            handler.ghostPrincipalBeforeSweep()
-        );
-        assertEq (
-            handler.ghostClaimableAfterSweep(),
-            handler.ghostClaimableBeforeSweep()
-        );
+        assertEq(handler.ghostPrincipalAfterSweep(), handler.ghostPrincipalBeforeSweep());
+        assertEq(handler.ghostClaimableAfterSweep(), handler.ghostClaimableBeforeSweep());
     }
 
     function invariant_StoredUnallocatedNeverExceedsSweepable() public view {
-        assertLe (
-            stakingRewards.storedUnallocatedRewards(),
-            stakingRewards.sweepableUnallocatedRewards()
-        );
+        assertLe(stakingRewards.storedUnallocatedRewards(), stakingRewards.sweepableUnallocatedRewards());
     }
-
 }

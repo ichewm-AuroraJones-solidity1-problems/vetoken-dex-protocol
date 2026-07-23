@@ -7,8 +7,8 @@ import {StakingRewards} from "../src/StakingRewards.sol";
 
 contract DeployStakingRewardsScript is Script {
     uint256 internal constant DEFAULT_REWARDS_DURATION = 7 days;
-   
-    function run() external returns (StakingRewards stakingRewards){
+
+    function run() external returns (StakingRewards stakingRewards) {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
         address deployer = vm.addr(deployerPrivateKey);
@@ -19,10 +19,7 @@ contract DeployStakingRewardsScript is Script {
         address rewardManager = vm.envOr("REWARD_MANAGER", deployer);
         address guardian = vm.envOr("GUARDIAN", deployer);
 
-        uint256 rewardDuration = vm.envOr(
-            "REWARDS_DURATION",
-            DEFAULT_REWARDS_DURATION
-        );
+        uint256 rewardDuration = vm.envOr("REWARDS_DURATION", DEFAULT_REWARDS_DURATION);
 
         require(initialOwner != address(0), "INITIAL_OWNER_ZERO");
         require(stakingToken != address(0), "STAKING_TOKEN_ZERO");
@@ -32,17 +29,10 @@ contract DeployStakingRewardsScript is Script {
         require(rewardDuration >= 1 days, "DURATION_TOO_SHORT");
         require(rewardDuration <= 365 days, "DURATION_TOO_LONG");
 
-
         vm.startBroadcast(deployerPrivateKey);
 
-        stakingRewards = new StakingRewards(
-            initialOwner,
-            stakingToken,
-            rewardToken,
-            rewardManager,
-            guardian,
-            rewardDuration
-        );
+        stakingRewards =
+            new StakingRewards(initialOwner, stakingToken, rewardToken, rewardManager, guardian, rewardDuration);
 
         vm.stopBroadcast();
 
@@ -56,5 +46,4 @@ contract DeployStakingRewardsScript is Script {
         console2.log("Deployer:", deployer);
     }
 }
-
 

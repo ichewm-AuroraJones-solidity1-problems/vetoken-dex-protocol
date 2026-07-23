@@ -15,7 +15,7 @@ contract StakingRewardsHandler is Test {
     address public rewardManager;
     address public owner;
     address public recoveryRecipient;
-    
+
     address[] public actors;
 
     uint256 public ghostStakes;
@@ -29,29 +29,28 @@ contract StakingRewardsHandler is Test {
     uint256 public ghostPrincipalAfterSweep;
     uint256 public ghostClaimableBeforeSweep;
     uint256 public ghostClaimableAfterSweep;
-    
-   constructor(
-    StakingRewards _stakingRewards,
-    MockERC20 _stakingToken,
-    MockERC20 _rewardToken,
-    address _rewardManager,
-    address _owner,
-    address _recoveryRecipient
-   ) {
-    stakingRewards = _stakingRewards;
-    stakingToken = _stakingToken;
-    rewardToken = _rewardToken;
-    rewardManager = _rewardManager;
-    owner = _owner;
-    recoveryRecipient = _recoveryRecipient;
 
-    actors.push(makeAddr("Alice"));
-    actors.push(makeAddr("Bob"));
-    actors.push(makeAddr("Charlie"));
+    constructor(
+        StakingRewards _stakingRewards,
+        MockERC20 _stakingToken,
+        MockERC20 _rewardToken,
+        address _rewardManager,
+        address _owner,
+        address _recoveryRecipient
+    ) {
+        stakingRewards = _stakingRewards;
+        stakingToken = _stakingToken;
+        rewardToken = _rewardToken;
+        rewardManager = _rewardManager;
+        owner = _owner;
+        recoveryRecipient = _recoveryRecipient;
 
-   }
+        actors.push(makeAddr("Alice"));
+        actors.push(makeAddr("Bob"));
+        actors.push(makeAddr("Charlie"));
+    }
 
-   function _actor(uint256 actorSeed) internal view returns (address) {
+    function _actor(uint256 actorSeed) internal view returns (address) {
         return actors[actorSeed % actors.length];
     }
 
@@ -70,9 +69,9 @@ contract StakingRewardsHandler is Test {
 
     function withdraw(uint256 actorSeed, uint256 amount) external {
         address actor = _actor(actorSeed);
-        
+
         uint256 balance = stakingRewards.balanceOf(actor);
-        if (balance == 0 ) return;
+        if (balance == 0) return;
 
         amount = bound(amount, 1, balance);
         vm.prank(actor);
@@ -112,7 +111,7 @@ contract StakingRewardsHandler is Test {
         address actor = _actor(actorSeed);
 
         uint256 balance = stakingRewards.balanceOf(actor);
-        
+
         vm.prank(actor);
         stakingRewards.emergencyExit();
 

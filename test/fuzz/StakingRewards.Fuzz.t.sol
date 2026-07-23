@@ -22,7 +22,7 @@ contract StakingRewardsFuzzTest is Test {
     uint256 public constant MIN_REWARDS_DURATION = 1 days;
     uint256 public constant MAX_REWARDS_DURATION = 365 days;
     address public treasury = makeAddr("treasury");
-    address public recoveryRecipient = makeAddr("recoveryRecipient"); 
+    address public recoveryRecipient = makeAddr("recoveryRecipient");
     address public alice = makeAddr("alice");
 
     /// @notice Emitted when a user stakes tokens.
@@ -56,21 +56,13 @@ contract StakingRewardsFuzzTest is Test {
 
     event PauseReason(address indexed operator, bytes32 reasonHash);
 
-
     function setUp() public {
         stakingToken = new MockERC20("Staking Token", "STAKING", 18);
         rewardToken = new MockERC20("Reward Token", "REWARD", 18);
         stakingRewards = new StakingRewards(
-            initialOwner,
-            address(stakingToken),
-            address(rewardToken),
-            rewardManager,
-            guardian,
-            REWARD_DURATION
+            initialOwner, address(stakingToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
         );
-
     }
-
 
     function testFuzz_Stake_IncreasesBalanceAndTotalStaked(uint256 amount) public {
         amount = bound(amount, 1, type(uint256).max);
@@ -89,7 +81,6 @@ contract StakingRewardsFuzzTest is Test {
         assertEq(beforeTotalStaked, 0);
         assertEq(afterBalance, 0);
         assertEq(afterTotalStaked, amount);
-    
     }
 
     function testFuzz_Withdraw_DecreasesBalanceAndTotalStaked(uint256 stakeAmount, uint256 withdrawAmount) public {
@@ -109,7 +100,6 @@ contract StakingRewardsFuzzTest is Test {
         assertEq(beforeTotalStaked, stakeAmount);
         assertEq(afterBalance, withdrawAmount);
         assertEq(afterTotalStaked, stakeAmount - withdrawAmount);
-    
     }
 
     function testFuzz_FundAndNotify_ComputesRateScheduledAndDust(uint256 amount) public {
@@ -120,11 +110,11 @@ contract StakingRewardsFuzzTest is Test {
         uint256 newScheduledRewards = newRewardRate * REWARD_DURATION;
         uint256 roundingDust = amount - newScheduledRewards;
 
-        assertEq (stakingRewards.accountedRewardBalance(), amount);
-        assertEq (stakingRewards.scheduledRewards(), newScheduledRewards);
-        assertEq (stakingRewards.unallocatedRewards(), roundingDust);
-        assertEq (stakingRewards.rewardRate(), newRewardRate);
-        assertEq (stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
+        assertEq(stakingRewards.accountedRewardBalance(), amount);
+        assertEq(stakingRewards.scheduledRewards(), newScheduledRewards);
+        assertEq(stakingRewards.unallocatedRewards(), roundingDust);
+        assertEq(stakingRewards.rewardRate(), newRewardRate);
+        assertEq(stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
     }
 
     function testFuzz_FundAndNotify_RejectsinvalidAmounts(uint256 amount) public {
@@ -139,8 +129,7 @@ contract StakingRewardsFuzzTest is Test {
             vm.expectRevert(StakingRewards.ZeroAmount.selector);
             stakingRewards.fundAndNotify(livalidAmount);
             vm.stopPrank();
-        }
-        else if (livalidCase == 1) {
+        } else if (livalidCase == 1) {
             livalidAmount = bound(amount, 1, REWARD_DURATION - 1);
             rewardToken.mint(rewardManager, livalidAmount);
             vm.startPrank(rewardManager);
@@ -148,31 +137,28 @@ contract StakingRewardsFuzzTest is Test {
             vm.expectRevert(StakingRewards.RewardTooSmall.selector);
             stakingRewards.fundAndNotify(livalidAmount);
             vm.stopPrank();
-        }
-        else if (livalidCase == 2) {
+        } else if (livalidCase == 2) {
             livalidAmount = bound(amount, MAX_REWARDS_AMOUNT + 1, type(uint256).max);
             rewardToken.mint(rewardManager, livalidAmount);
             vm.startPrank(rewardManager);
             rewardToken.approve(address(stakingRewards), livalidAmount);
             vm.expectRevert(
-                abi.encodeWithSelector(
-                    StakingRewards.RewardAmountTooLarge.selector,
-                    livalidAmount,
-                    MAX_REWARDS_AMOUNT
-                )
+                abi.encodeWithSelector(StakingRewards.RewardAmountTooLarge.selector, livalidAmount, MAX_REWARDS_AMOUNT)
             );
             stakingRewards.fundAndNotify(livalidAmount);
             vm.stopPrank();
         }
 
-        assertEq (stakingRewards.accountedRewardBalance(), 0);
-        assertEq (stakingRewards.scheduledRewards(), 0);
-        assertEq (stakingRewards.unallocatedRewards(), 0);
-        assertEq (stakingRewards.rewardRate(), 0);
-        assertEq (stakingRewards.periodFinish(), 0);
+        assertEq(stakingRewards.accountedRewardBalance(), 0);
+        assertEq(stakingRewards.scheduledRewards(), 0);
+        assertEq(stakingRewards.unallocatedRewards(), 0);
+        assertEq(stakingRewards.rewardRate(), 0);
+        assertEq(stakingRewards.periodFinish(), 0);
     }
 
-    function testFuzz_Earned_NeverExceedsReleasedReward(uint256 stakeAmount, uint256 rewardAmount, uint256 elapsed) public {
+    function testFuzz_Earned_NeverExceedsReleasedReward(uint256 stakeAmount, uint256 rewardAmount, uint256 elapsed)
+        public
+    {
         stakeAmount = bound(stakeAmount, 1, type(uint256).max);
         rewardAmount = bound(rewardAmount, REWARD_DURATION, MAX_REWARDS_AMOUNT);
         elapsed = bound(elapsed, 1, REWARD_DURATION);
@@ -185,8 +171,8 @@ contract StakingRewardsFuzzTest is Test {
         vm.warp(block.timestamp + elapsed);
         uint256 afterEarned = stakingRewards.earned(alice);
 
-        assertGe (afterEarned, beforeEarned);
-        assertGe (stakingRewards.accountedRewardBalance(), afterEarned);
+        assertGe(afterEarned, beforeEarned);
+        assertGe(stakingRewards.accountedRewardBalance(), afterEarned);
     }
 
     function testFuzz_GetReward_PaysAtMostEarned(uint256 stakeAmount, uint256 rewardAmount, uint256 elapsed) public {
@@ -204,14 +190,18 @@ contract StakingRewardsFuzzTest is Test {
         vm.prank(alice);
         stakingRewards.getReward();
 
-        assertEq (stakingRewards.balanceOf(alice), stakeAmount);
-        assertEq (stakingRewards.earned(alice), 0);
-        assertEq (rewardToken.balanceOf(alice), totalEarned);
+        assertEq(stakingRewards.balanceOf(alice), stakeAmount);
+        assertEq(stakingRewards.earned(alice), 0);
+        assertEq(rewardToken.balanceOf(alice), totalEarned);
     }
 
-    function testFuzz_SweepUnallocated_CannotSweepMoreThanSweepable(uint256 rewardAmount, uint256 elapsed, uint256 sweepAmount) public {
-        rewardAmount = bound(rewardAmount, REWARD_DURATION, MAX_REWARDS_AMOUNT );
-        elapsed = bound(elapsed, 1, REWARD_DURATION );
+    function testFuzz_SweepUnallocated_CannotSweepMoreThanSweepable(
+        uint256 rewardAmount,
+        uint256 elapsed,
+        uint256 sweepAmount
+    ) public {
+        rewardAmount = bound(rewardAmount, REWARD_DURATION, MAX_REWARDS_AMOUNT);
+        elapsed = bound(elapsed, 1, REWARD_DURATION);
 
         _fundAndNotify(rewardAmount);
 
@@ -227,16 +217,20 @@ contract StakingRewardsFuzzTest is Test {
         stakingRewards.sweepUnallocatedRewards(recoveryRecipient, sweepAmount);
         vm.stopPrank();
 
-        assertEq (stakingRewards.unallocatedRewards(), sweepable - sweepAmount);
-        assertEq (stakingRewards.accountedRewardBalance(), beforeAccountedRewardBalance - sweepAmount);
-        assertEq (rewardToken.balanceOf(recoveryRecipient), beforeRecipientAmount + sweepAmount);
+        assertEq(stakingRewards.unallocatedRewards(), sweepable - sweepAmount);
+        assertEq(stakingRewards.accountedRewardBalance(), beforeAccountedRewardBalance - sweepAmount);
+        assertEq(rewardToken.balanceOf(recoveryRecipient), beforeRecipientAmount + sweepAmount);
     }
 
-    function testFuzz_RecoverExcessStakingToken_CannotRecoverPrincipal(uint256 stakeAmount, uint256 donation, uint256 recoverAmount) public {
+    function testFuzz_RecoverExcessStakingToken_CannotRecoverPrincipal(
+        uint256 stakeAmount,
+        uint256 donation,
+        uint256 recoverAmount
+    ) public {
         stakeAmount = bound(stakeAmount, 1, 1e24);
         donation = bound(donation, 1, 1e24);
         recoverAmount = bound(recoverAmount, 1, donation);
-        
+
         _stake(alice, stakeAmount);
 
         stakingToken.mint(address(stakingRewards), donation);
@@ -248,10 +242,10 @@ contract StakingRewardsFuzzTest is Test {
         stakingRewards.recoverExcessStakingToken(recoveryRecipient, recoverAmount);
         vm.stopPrank();
 
-        assertEq (stakingToken.balanceOf(address(stakingRewards)), stakeAmount + donation - recoverAmount);
-        assertEq (stakingToken.balanceOf(alice), 0);
-        assertEq (stakingToken.balanceOf(recoveryRecipient), recoverAmount);
-        assertEq (stakingRewards.balanceOf(alice), stakeAmount);
+        assertEq(stakingToken.balanceOf(address(stakingRewards)), stakeAmount + donation - recoverAmount);
+        assertEq(stakingToken.balanceOf(alice), 0);
+        assertEq(stakingToken.balanceOf(recoveryRecipient), recoverAmount);
+        assertEq(stakingRewards.balanceOf(alice), stakeAmount);
     }
 
     function testFuzz_SetRewardsDuration_AcceptsOnlyValidRange(uint256 duration) public {
@@ -268,13 +262,8 @@ contract StakingRewardsFuzzTest is Test {
         amount = bound(amount, 1, 1e24);
         feeBps = bound(feeBps, 1, 9999);
         FeeOnTransferMock feeToken = new FeeOnTransferMock("Fee Token", "FEETOKEN", feeBps);
-        StakingRewards  FeeStakingRewards = new StakingRewards(
-            initialOwner,
-            address(feeToken),
-            address(rewardToken),
-            rewardManager,
-            guardian,
-            REWARD_DURATION
+        StakingRewards FeeStakingRewards = new StakingRewards(
+            initialOwner, address(feeToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
         );
         feeToken.mint(alice, amount);
 
@@ -282,19 +271,17 @@ contract StakingRewardsFuzzTest is Test {
         feeToken.approve(address(FeeStakingRewards), amount);
         uint256 expectedFee = Math.mulDiv(amount, feeBps, 10000);
         vm.assume(expectedFee > 0);
-        uint256 expectedAmount = amount - expectedFee; 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                StakingRewards.InvalidReceivedAmount.selector,
-                amount,
-                expectedAmount
-            )
-        );
+        uint256 expectedAmount = amount - expectedFee;
+        vm.expectRevert(abi.encodeWithSelector(StakingRewards.InvalidReceivedAmount.selector, amount, expectedAmount));
         FeeStakingRewards.stake(amount);
         vm.stopPrank();
     }
 
-    function testFuzz_EmergencyExit_ReturnsPrincipalAndForfeitsRewards(uint256 stakeAmount, uint256 rewardAmount, uint256 elapsed) public {
+    function testFuzz_EmergencyExit_ReturnsPrincipalAndForfeitsRewards(
+        uint256 stakeAmount,
+        uint256 rewardAmount,
+        uint256 elapsed
+    ) public {
         stakeAmount = bound(stakeAmount, 1, 1e24);
         rewardAmount = bound(rewardAmount, REWARD_DURATION, 100 * REWARD_DURATION);
         elapsed = bound(elapsed, 1, REWARD_DURATION);
@@ -311,13 +298,13 @@ contract StakingRewardsFuzzTest is Test {
         vm.prank(alice);
         stakingRewards.emergencyExit();
 
-        assertEq (stakingToken.balanceOf(alice), stakeAmount);
-        assertEq (stakingRewards.balanceOf(alice), 0);
-        assertEq (stakingRewards.totalStaked(), 0);
+        assertEq(stakingToken.balanceOf(alice), stakeAmount);
+        assertEq(stakingRewards.balanceOf(alice), 0);
+        assertEq(stakingRewards.totalStaked(), 0);
 
-        assertEq (rewardToken.balanceOf(alice), 0);
-        assertEq (stakingRewards.rewards(alice), 0);
-        assertApproxEqAbs (stakingRewards.unallocatedRewards(), beforeUnallocatedRewards + beforeRewards, 1e12);
+        assertEq(rewardToken.balanceOf(alice), 0);
+        assertEq(stakingRewards.rewards(alice), 0);
+        assertApproxEqAbs(stakingRewards.unallocatedRewards(), beforeUnallocatedRewards + beforeRewards, 1e12);
     }
 
     // =====================================internal functions ==========================
@@ -337,5 +324,4 @@ contract StakingRewardsFuzzTest is Test {
         stakingRewards.fundAndNotify(amount);
         vm.stopPrank();
     }
-
 }
