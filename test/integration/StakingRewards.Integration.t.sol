@@ -113,12 +113,12 @@ contract StakingRewardsIntegrationTest is Test {
         vm.warp(block.timestamp + elapsed);
         vm.prank(alice);
         stakingRewards.withdraw(stakeAmount);
-        assertEq (stakingRewards.balanceOf(alice), 0);
+        assertEq(stakingRewards.balanceOf(alice), 0);
         assertEq(stakingRewards.earned(alice), elapsed);
 
         vm.warp(block.timestamp + elapsed);
         _stake(alice, stakeAmount);
-        assertEq (stakingRewards.earned(alice), elapsed);
+        assertEq(stakingRewards.earned(alice), elapsed);
 
         vm.warp(block.timestamp + elapsed);
         assertEq(stakingRewards.earned(alice), elapsed * 2);
@@ -328,22 +328,22 @@ contract StakingRewardsIntegrationTest is Test {
         vm.warp(firstFinish + 30 days);
         rewardToken.mint(address(stakingRewards), donation);
         stakingRewards.syncUnallocatedRewards();
-        
-        assertEq (stakingRewards.accountedRewardBalance(), firstRewardAmount + donation);
-        assertEq (stakingRewards.unallocatedRewards(), donation);
-        assertEq (stakingRewards.scheduledRewards(), firstRewardAmount);
+
+        assertEq(stakingRewards.accountedRewardBalance(), firstRewardAmount + donation);
+        assertEq(stakingRewards.unallocatedRewards(), donation);
+        assertEq(stakingRewards.scheduledRewards(), firstRewardAmount);
 
         _fundAndNotify(secondRewardAmount);
         uint256 expectedSecondRate = secondRewardAmount / REWARD_DURATION;
         uint256 expectedSecondScheduled = expectedSecondRate * REWARD_DURATION;
         uint256 expectedSecondDust = secondRewardAmount - expectedSecondScheduled;
 
-        assertEq (stakingRewards.rewardRate(), expectedSecondRate);
-        assertEq (stakingRewards.scheduledRewards(), expectedSecondScheduled);
-        assertEq (stakingRewards.unallocatedRewards(), firstRewardAmount + donation + expectedSecondDust);
-        assertEq (stakingRewards.accountedRewardBalance(), firstRewardAmount + donation + secondRewardAmount);
-        assertEq (stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
-        assertEq (rewardToken.balanceOf(address(stakingRewards)), firstRewardAmount + donation + secondRewardAmount);
+        assertEq(stakingRewards.rewardRate(), expectedSecondRate);
+        assertEq(stakingRewards.scheduledRewards(), expectedSecondScheduled);
+        assertEq(stakingRewards.unallocatedRewards(), firstRewardAmount + donation + expectedSecondDust);
+        assertEq(stakingRewards.accountedRewardBalance(), firstRewardAmount + donation + secondRewardAmount);
+        assertEq(stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
+        assertEq(rewardToken.balanceOf(address(stakingRewards)), firstRewardAmount + donation + secondRewardAmount);
     }
 
     function test_Integration_WhenPaused_OwnerCanRunSafetyOperations() public {
@@ -358,7 +358,7 @@ contract StakingRewardsIntegrationTest is Test {
         vm.prank(guardian);
         stakingRewards.pause(bytes32("guardian pause"));
 
-        assertTrue (stakingRewards.paused());
+        assertTrue(stakingRewards.paused());
 
         stakingToken.mint(alice, 1);
         vm.startPrank(alice);
@@ -382,86 +382,86 @@ contract StakingRewardsIntegrationTest is Test {
         stakingRewards.setSweepRecipientAllowed(recoveryRecipient, true);
         vm.stopPrank();
 
-        assertEq (stakingRewards.rewardsDuration(), newDuration);
-        assertEq (stakingRewards.rewardManager(), newManager);
-        assertEq (stakingRewards.guardian(), newGuardian);
-        assertTrue (stakingRewards.sweepRecipientAllowed(treasury));
-        assertTrue (stakingRewards.sweepRecipientAllowed(recoveryRecipient));
-        assertTrue (stakingRewards.paused());
+        assertEq(stakingRewards.rewardsDuration(), newDuration);
+        assertEq(stakingRewards.rewardManager(), newManager);
+        assertEq(stakingRewards.guardian(), newGuardian);
+        assertTrue(stakingRewards.sweepRecipientAllowed(treasury));
+        assertTrue(stakingRewards.sweepRecipientAllowed(recoveryRecipient));
+        assertTrue(stakingRewards.paused());
 
         rewardToken.mint(address(stakingRewards), rewardDonation);
         stakingRewards.syncUnallocatedRewards();
 
         vm.prank(initialOwner);
         stakingRewards.sweepUnallocatedRewards(treasury, rewardDonation);
-        assertEq (rewardToken.balanceOf(treasury), rewardDonation);
+        assertEq(rewardToken.balanceOf(treasury), rewardDonation);
 
         stakingToken.mint(address(stakingRewards), excessStakeToken);
         vm.prank(initialOwner);
         stakingRewards.recoverExcessStakingToken(recoveryRecipient, excessStakeToken);
-        assertEq (stakingToken.balanceOf(recoveryRecipient), excessStakeToken);
+        assertEq(stakingToken.balanceOf(recoveryRecipient), excessStakeToken);
 
         otherToken.mint(address(stakingRewards), recoveryAmount);
         vm.prank(initialOwner);
         stakingRewards.recoverERC20(address(otherToken), recoveryRecipient, recoveryAmount);
-        assertEq (otherToken.balanceOf(recoveryRecipient), recoveryAmount);
-        
+        assertEq(otherToken.balanceOf(recoveryRecipient), recoveryAmount);
+
         vm.prank(initialOwner);
         stakingRewards.unpause();
-        assertFalse (stakingRewards.paused());
+        assertFalse(stakingRewards.paused());
     }
 
     function test_Integration_multipleTopUpAcrossPeriods_UsesLeftoverCorrectly() public {
-    uint256 stakeAmount = 1000;
-    uint256 firstRewardAmount = 10 * REWARD_DURATION;
-    uint256 secondRewardAmount = 5 * REWARD_DURATION;
-    uint256 thirdRewardAmount = 2 * REWARD_DURATION;
-    uint256 expectedUnallocatedRewards;
+        uint256 stakeAmount = 1000;
+        uint256 firstRewardAmount = 10 * REWARD_DURATION;
+        uint256 secondRewardAmount = 5 * REWARD_DURATION;
+        uint256 thirdRewardAmount = 2 * REWARD_DURATION;
+        uint256 expectedUnallocatedRewards;
 
-    _stake(alice, stakeAmount);
-    _fundAndNotify(firstRewardAmount);
+        _stake(alice, stakeAmount);
+        _fundAndNotify(firstRewardAmount);
 
-    {
-        uint256 firstRate = stakingRewards.rewardRate();
-        uint256 firstFinish = stakingRewards.periodFinish();
+        {
+            uint256 firstRate = stakingRewards.rewardRate();
+            uint256 firstFinish = stakingRewards.periodFinish();
 
-        vm.warp(block.timestamp + 1 days);
+            vm.warp(block.timestamp + 1 days);
 
-        uint256 leftoverBeforeSecond = (firstFinish - block.timestamp) * firstRate;
-        uint256 grossSecondRewards = secondRewardAmount + leftoverBeforeSecond;
-        uint256 expectedSecondRate = grossSecondRewards / REWARD_DURATION;
-        uint256 expectedSecondScheduled = expectedSecondRate * REWARD_DURATION;
-        uint256 expectedSecondDust = grossSecondRewards - expectedSecondScheduled;
+            uint256 leftoverBeforeSecond = (firstFinish - block.timestamp) * firstRate;
+            uint256 grossSecondRewards = secondRewardAmount + leftoverBeforeSecond;
+            uint256 expectedSecondRate = grossSecondRewards / REWARD_DURATION;
+            uint256 expectedSecondScheduled = expectedSecondRate * REWARD_DURATION;
+            uint256 expectedSecondDust = grossSecondRewards - expectedSecondScheduled;
 
-        expectedUnallocatedRewards = stakingRewards.unallocatedRewards() + expectedSecondDust;
+            expectedUnallocatedRewards = stakingRewards.unallocatedRewards() + expectedSecondDust;
 
-        _fundAndNotify(secondRewardAmount);
+            _fundAndNotify(secondRewardAmount);
 
-        assertEq(stakingRewards.rewardRate(), expectedSecondRate);
-        assertEq(stakingRewards.scheduledRewards(), expectedSecondScheduled);
-        assertEq(stakingRewards.unallocatedRewards(), expectedUnallocatedRewards);
+            assertEq(stakingRewards.rewardRate(), expectedSecondRate);
+            assertEq(stakingRewards.scheduledRewards(), expectedSecondScheduled);
+            assertEq(stakingRewards.unallocatedRewards(), expectedUnallocatedRewards);
+            assertEq(stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
+        }
+
+        vm.warp(stakingRewards.periodFinish() + 3 days);
+
+        _fundAndNotify(thirdRewardAmount);
+
+        {
+            uint256 expectedThirdRate = thirdRewardAmount / REWARD_DURATION;
+            uint256 expectedThirdScheduled = expectedThirdRate * REWARD_DURATION;
+            uint256 expectedThirdDust = thirdRewardAmount - expectedThirdScheduled;
+
+            expectedUnallocatedRewards += expectedThirdDust;
+
+            assertEq(stakingRewards.rewardRate(), expectedThirdRate);
+            assertEq(stakingRewards.scheduledRewards(), expectedThirdScheduled);
+            assertEq(stakingRewards.unallocatedRewards(), expectedUnallocatedRewards);
+        }
+
+        assertEq(stakingRewards.accountedRewardBalance(), firstRewardAmount + secondRewardAmount + thirdRewardAmount);
         assertEq(stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
     }
-
-    vm.warp(stakingRewards.periodFinish() + 3 days);
-
-    _fundAndNotify(thirdRewardAmount);
-
-    {
-        uint256 expectedThirdRate = thirdRewardAmount / REWARD_DURATION;
-        uint256 expectedThirdScheduled = expectedThirdRate * REWARD_DURATION;
-        uint256 expectedThirdDust = thirdRewardAmount - expectedThirdScheduled;
-
-        expectedUnallocatedRewards += expectedThirdDust;
-
-        assertEq(stakingRewards.rewardRate(), expectedThirdRate);
-        assertEq(stakingRewards.scheduledRewards(), expectedThirdScheduled);
-        assertEq(stakingRewards.unallocatedRewards(), expectedUnallocatedRewards);
-    }
-
-    assertEq(stakingRewards.accountedRewardBalance(), firstRewardAmount + secondRewardAmount + thirdRewardAmount);
-    assertEq(stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
-}
 
     function test_Integration_DonationSyncSweep_DoesNotAffectUserClaimableRewards() public {
         uint256 stakeAmount = 1000;

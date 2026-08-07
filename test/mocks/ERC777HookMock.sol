@@ -25,10 +25,10 @@ contract ERC777HookMock is ERC20 {
     bool public enabled;
     bool private entered;
 
-    constructor(string memory name_, string memory symbol_) ERC20(name_,symbol_) {}
+    constructor(string memory name_, string memory symbol_) ERC20(name_, symbol_) {}
 
     function mint(address to, uint256 amount) external {
-        _mint(to,amount);
+        _mint(to, amount);
     }
 
     function approveSpender(address spender, uint256 amount) external {
@@ -65,28 +65,20 @@ contract ERC777HookMock is ERC20 {
     function _reenter() internal {
         if (reenterCall == ReenterCall.Stake) {
             target.stake(reenterAmount);
-    
         } else if (reenterCall == ReenterCall.Withdraw) {
             target.withdraw(reenterAmount);
-
         } else if (reenterCall == ReenterCall.GetReward) {
             target.getReward();
-
         } else if (reenterCall == ReenterCall.Exit) {
             target.exit();
-
         } else if (reenterCall == ReenterCall.EmergencyExit) {
             target.emergencyExit();
-
         } else if (reenterCall == ReenterCall.FundAndNotify) {
             target.fundAndNotify(reenterAmount);
-
         } else if (reenterCall == ReenterCall.SweepUnallocatedRewards) {
             target.sweepUnallocatedRewards(recipient, reenterAmount);
-
         } else if (reenterCall == ReenterCall.RecoverExcessStakingToken) {
             target.recoverExcessStakingToken(recipient, reenterAmount);
-            
         } else if (reenterCall == ReenterCall.RecoverERC20) {
             target.recoverERC20(recoverToken, recipient, reenterAmount);
         }

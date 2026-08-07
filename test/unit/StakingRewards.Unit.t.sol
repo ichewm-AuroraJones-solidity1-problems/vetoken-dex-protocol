@@ -56,12 +56,7 @@ contract StakingRewardsUnitTest is Test {
         stakingToken = new MockERC20("Staking Token", "STAKING", 18);
         rewardToken = new MockERC20("Reward Token", "REWARD", 18);
         stakingRewards = new StakingRewards(
-            initialOwner, 
-            address(stakingToken),
-            address(rewardToken), 
-            rewardManager, 
-            guardian, 
-            REWARD_DURATION
+            initialOwner, address(stakingToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
         );
     }
 
@@ -162,7 +157,7 @@ contract StakingRewardsUnitTest is Test {
         vm.prank(initialOwner);
         stakingRewards.setGuardian(address(0));
 
-        assertEq (stakingRewards.guardian(), address(0));
+        assertEq(stakingRewards.guardian(), address(0));
 
         vm.prank(guardian);
         vm.expectRevert(StakingRewards.OnlyGuardianOrOwner.selector);
@@ -685,10 +680,10 @@ contract StakingRewardsUnitTest is Test {
         uint256 totalStake = stakeAmountAlice + stakeAmountBob;
         uint256 released = elapsed;
 
-        assertEq (stakingRewards.earned(alice), Math.mulDiv(released, stakeAmountAlice, totalStake));
-        assertEq (stakingRewards.earned(bob), Math.mulDiv(released, stakeAmountBob, totalStake));
-        assertEq (stakingRewards.earned(alice), 25);
-        assertEq (stakingRewards.earned(bob), 75);
+        assertEq(stakingRewards.earned(alice), Math.mulDiv(released, stakeAmountAlice, totalStake));
+        assertEq(stakingRewards.earned(bob), Math.mulDiv(released, stakeAmountBob, totalStake));
+        assertEq(stakingRewards.earned(alice), 25);
+        assertEq(stakingRewards.earned(bob), 75);
     }
 
     function test_Earned_MultipleUsersPartialWithdrawContinuesBySegmentedPrincipal() public {
@@ -708,12 +703,12 @@ contract StakingRewardsUnitTest is Test {
 
         vm.warp(block.timestamp + elapsedAfterWithdraw);
 
-        assertEq (stakingRewards.balanceOf(alice), 500);
-        assertEq (stakingRewards.balanceOf(bob), 3000);
-        assertEq (stakingRewards.totalStaked(), 3500);
+        assertEq(stakingRewards.balanceOf(alice), 500);
+        assertEq(stakingRewards.balanceOf(bob), 3000);
+        assertEq(stakingRewards.totalStaked(), 3500);
 
-        assertEq (stakingRewards.earned(alice), 35);
-        assertEq (stakingRewards.earned(bob), 135);
+        assertEq(stakingRewards.earned(alice), 35);
+        assertEq(stakingRewards.earned(bob), 135);
     }
 
     function test_Non18Decimals_Staking6Reward18() public {
@@ -1029,22 +1024,22 @@ contract StakingRewardsUnitTest is Test {
         vm.prank(alice);
         stakingRewards.emergencyExit();
 
-        assertEq (stakingRewards.balanceOf(alice), 0);
-        assertEq (stakingToken.balanceOf(alice), stakeAmountAlice);
-        assertEq (rewardToken.balanceOf(alice), 0);
-        assertEq (stakingRewards.rewards(alice), 0);
-        assertEq (stakingRewards.unallocatedRewards(), 25);
-        assertEq (stakingRewards.balanceOf(bob), stakeAmountBob);
-        assertEq (stakingRewards.earned(bob), 75);
+        assertEq(stakingRewards.balanceOf(alice), 0);
+        assertEq(stakingToken.balanceOf(alice), stakeAmountAlice);
+        assertEq(rewardToken.balanceOf(alice), 0);
+        assertEq(stakingRewards.rewards(alice), 0);
+        assertEq(stakingRewards.unallocatedRewards(), 25);
+        assertEq(stakingRewards.balanceOf(bob), stakeAmountBob);
+        assertEq(stakingRewards.earned(bob), 75);
 
         vm.warp(block.timestamp + elapsedAfterExit);
-        assertEq (stakingRewards.earned(bob), 135);
+        assertEq(stakingRewards.earned(bob), 135);
 
         vm.prank(bob);
         stakingRewards.getReward();
 
-        assertEq (rewardToken.balanceOf(bob), 135);
-        assertEq (stakingRewards.balanceOf(bob), stakeAmountBob);
+        assertEq(rewardToken.balanceOf(bob), 135);
+        assertEq(stakingRewards.balanceOf(bob), stakeAmountBob);
     }
 
     // ---------------------------------------------------------------------------
@@ -1372,7 +1367,7 @@ contract StakingRewardsUnitTest is Test {
 
         stakingRewards.pause(bytes32("Owner Pause"));
 
-        assertTrue (stakingRewards.paused());
+        assertTrue(stakingRewards.paused());
         vm.stopPrank();
     }
 
@@ -1387,7 +1382,7 @@ contract StakingRewardsUnitTest is Test {
 
         stakingRewards.pause(bytes32("Guardian Pause"));
 
-        assertTrue (stakingRewards.paused());
+        assertTrue(stakingRewards.paused());
         vm.stopPrank();
     }
 
@@ -1419,7 +1414,7 @@ contract StakingRewardsUnitTest is Test {
     function test_Unpause_ByOwner() public {
         vm.prank(initialOwner);
         stakingRewards.pause(bytes32("Owner Pause"));
-        assertTrue (stakingRewards.paused());
+        assertTrue(stakingRewards.paused());
 
         vm.startPrank(initialOwner);
         vm.expectEmit(true, false, false, true, address(stakingRewards));
@@ -1570,15 +1565,15 @@ contract StakingRewardsUnitTest is Test {
         vm.startPrank(initialOwner);
         stakingRewards.setRewardManager(newManager);
         stakingRewards.setGuardian(newGuardian);
-        stakingRewards.setSweepRecipientAllowed(treasury,true);
+        stakingRewards.setSweepRecipientAllowed(treasury, true);
         stakingRewards.setRewardsDuration(newDuration);
         vm.stopPrank();
 
-        assertEq (stakingRewards.rewardManager(), newManager);
-        assertEq (stakingRewards.guardian(), newGuardian);
-        assertTrue (stakingRewards.sweepRecipientAllowed(treasury));
-        assertEq (stakingRewards.rewardsDuration(), newDuration);
-        assertTrue (stakingRewards.paused());
+        assertEq(stakingRewards.rewardManager(), newManager);
+        assertEq(stakingRewards.guardian(), newGuardian);
+        assertTrue(stakingRewards.sweepRecipientAllowed(treasury));
+        assertEq(stakingRewards.rewardsDuration(), newDuration);
+        assertTrue(stakingRewards.paused());
     }
 
     // --------------------------------------------------------------
@@ -1594,7 +1589,7 @@ contract StakingRewardsUnitTest is Test {
         emit RewardsDurationUpdated(REWARD_DURATION, newDuration);
         stakingRewards.setRewardsDuration(newDuration);
 
-        assertEq (stakingRewards.rewardsDuration(), newDuration);
+        assertEq(stakingRewards.rewardsDuration(), newDuration);
         vm.stopPrank();
     }
 
@@ -1646,7 +1641,6 @@ contract StakingRewardsUnitTest is Test {
         assertEq(stakingRewards.rewardsDuration(), newDuration);
     }
 
-
     // ------------------------------------------------------------------------------
     // view functions test
     // ------------------------------------------------------------------------------
@@ -1697,15 +1691,15 @@ contract StakingRewardsUnitTest is Test {
 
     function test_IsRewardPeriodActive_ReturnsExpectedValue() public {
         uint256 rewardAmount = REWARD_DURATION;
-        assertFalse (stakingRewards.isRewardPeriodActive());
+        assertFalse(stakingRewards.isRewardPeriodActive());
 
         _fundAndNotify(rewardAmount);
 
-        assertTrue (stakingRewards.isRewardPeriodActive());
+        assertTrue(stakingRewards.isRewardPeriodActive());
 
         vm.warp(stakingRewards.periodFinish());
 
-        assertFalse (stakingRewards.isRewardPeriodActive());
+        assertFalse(stakingRewards.isRewardPeriodActive());
     }
 
     function test_StoredUnallocatedRewards_WhenNoStakersDoesNotIncludePendingReleasedRewards() public {
@@ -1714,9 +1708,9 @@ contract StakingRewardsUnitTest is Test {
         _fundAndNotify(rewardAmount);
         vm.warp(block.timestamp + elapsed);
 
-        assertEq (stakingRewards.storedUnallocatedRewards(), 0);
-        assertEq (stakingRewards.unallocatedRewards(), 0);
-        assertEq (stakingRewards.sweepableUnallocatedRewards(), elapsed);
+        assertEq(stakingRewards.storedUnallocatedRewards(), 0);
+        assertEq(stakingRewards.unallocatedRewards(), 0);
+        assertEq(stakingRewards.sweepableUnallocatedRewards(), elapsed);
     }
 
     function test_StoredUnallocatedRewards_AfterNoStakersCheckpointIncludesReleasedRewards() public {
@@ -1728,8 +1722,8 @@ contract StakingRewardsUnitTest is Test {
         vm.prank(alice);
         stakingRewards.getReward();
 
-        assertEq (stakingRewards.storedUnallocatedRewards(), elapsed);
-        assertEq (stakingRewards.unallocatedRewards(), elapsed);
+        assertEq(stakingRewards.storedUnallocatedRewards(), elapsed);
+        assertEq(stakingRewards.unallocatedRewards(), elapsed);
     }
 
     function test_StoredUnallocatedRewards_WhenStakersExistDoesNotCountActiveAccrual() public {

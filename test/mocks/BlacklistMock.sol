@@ -11,7 +11,7 @@ contract BlacklistMock is ERC20 {
     constructor(string memory name_, string memory symbol_) ERC20(name_, symbol_) {}
 
     function mint(address to, uint256 amount) external {
-        _mint(to,amount);
+        _mint(to, amount);
     }
 
     function setBlacklisted(address account, bool value) external {
@@ -21,6 +21,6 @@ contract BlacklistMock is ERC20 {
     function _update(address from, address to, uint256 value) internal override {
         if (from != address(0) && blacklisted[from]) revert Blacklisted(from);
         if (to != address(0) && blacklisted[to]) revert Blacklisted(to);
-        super._update(from,to,value);
+        super._update(from, to, value);
     }
 }

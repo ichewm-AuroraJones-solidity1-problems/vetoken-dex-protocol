@@ -173,8 +173,8 @@ contract StakingRewardsFuzzTest is Test {
         uint256 released = rewardRate * elapsed;
         uint256 expected = _expectedEarnedFromSegment(released, stakeAmount, stakeAmount);
 
-        assertEq (stakingRewards.earned(alice), expected);
-        assertLe (expected, released); 
+        assertEq(stakingRewards.earned(alice), expected);
+        assertLe(expected, released);
     }
 
     function testFuzz_GetReward_PaysAtMostEarned(uint256 stakeAmount, uint256 rewardAmount, uint256 elapsed) public {
@@ -334,9 +334,9 @@ contract StakingRewardsFuzzTest is Test {
         uint256 expectedAlice = _expectedEarnedFromSegment(released, stakeAmountAlice, totalStaked);
         uint256 expectedBob = _expectedEarnedFromSegment(released, stakeAmountBob, totalStaked);
 
-        assertEq (stakingRewards.earned(alice), expectedAlice);
-        assertEq (stakingRewards.earned(bob), expectedBob);
-        assertLe (expectedAlice + expectedBob, released);
+        assertEq(stakingRewards.earned(alice), expectedAlice);
+        assertEq(stakingRewards.earned(bob), expectedBob);
+        assertLe(expectedAlice + expectedBob, released);
     }
 
     // =====================================internal functions ==========================
@@ -357,11 +357,11 @@ contract StakingRewardsFuzzTest is Test {
         vm.stopPrank();
     }
 
-    function _expectedEarnedFromSegment(
-        uint256 released,
-        uint256 userStake,
-        uint256 totalStake
-    ) internal pure returns (uint256) {
+    function _expectedEarnedFromSegment(uint256 released, uint256 userStake, uint256 totalStake)
+        internal
+        pure
+        returns (uint256)
+    {
         if (totalStake == 0) return 0;
 
         uint256 rpt = Math.mulDiv(released, 1e18, totalStake);

@@ -46,13 +46,7 @@ contract DeployStakingRewardsScript is Script {
         vm.stopBroadcast();
 
         _verifyDeployment(
-            stakingRewards,
-            initialOwner,
-            stakingToken,
-            rewardToken,
-            rewardManager,
-            guardian,
-            rewardDuration
+            stakingRewards, initialOwner, stakingToken, rewardToken, rewardManager, guardian, rewardDuration
         );
 
         console2.log("StakingRewards deployed at :", address(stakingRewards));
@@ -73,7 +67,7 @@ contract DeployStakingRewardsScript is Script {
         address rewardManager,
         address guardian,
         uint256 rewardDuration
-    ) internal  view {
+    ) internal view {
         require(stakingRewards.owner() == initialOwner, "OWNER_MISMATCH");
         require(address(stakingRewards.stakingToken()) == stakingToken, "STAKING_TOKEN_MISMATCH");
         require(address(stakingRewards.rewardToken()) == rewardToken, "REWARD_TOKEN_MISMATCH");
@@ -85,7 +79,7 @@ contract DeployStakingRewardsScript is Script {
         require(stakingRewards.rewardRate() == 0, "REWARD_RATE_NOT_ZERO");
         require(stakingRewards.lastUpdateTime() == 0, "LAST_UPDATE_TIME_NOT_ZERO");
         require(stakingRewards.rewardPerTokenStored() == 0, "PRT_NOT_ZERO");
-        
+
         require(stakingRewards.totalStaked() == 0, "TOTAL_STAKED_NOT_ZERO");
         require(stakingRewards.scheduledRewards() == 0, "SCHEDULED_NOT_ZERO");
         require(stakingRewards.accruedRewardReserve() == 0, "RESERVE_NOT_ZERO");
@@ -95,7 +89,6 @@ contract DeployStakingRewardsScript is Script {
         require(stakingRewards.accountedRewardBalance() == 0, "ACCOUNTED_NOT_ZERO");
 
         require(stakingRewards.paused() == false, "PAUSED");
-
     }
 }
 
