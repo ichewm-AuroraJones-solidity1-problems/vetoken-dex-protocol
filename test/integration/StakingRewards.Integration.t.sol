@@ -7,6 +7,7 @@ import {MockERC20} from "../mocks/MockERC20.sol";
 import {FeeOnTransferMock} from "../mocks/FeeOnTransferMock.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 contract StakingRewardsIntegrationTest is Test {
     StakingRewards public stakingRewards;
@@ -112,10 +113,12 @@ contract StakingRewardsIntegrationTest is Test {
         vm.warp(block.timestamp + elapsed);
         vm.prank(alice);
         stakingRewards.withdraw(stakeAmount);
+        assertEq (stakingRewards.balanceOf(alice), 0);
         assertEq(stakingRewards.earned(alice), elapsed);
 
         vm.warp(block.timestamp + elapsed);
         _stake(alice, stakeAmount);
+        assertEq (stakingRewards.earned(alice), elapsed);
 
         vm.warp(block.timestamp + elapsed);
         assertEq(stakingRewards.earned(alice), elapsed * 2);
@@ -315,11 +318,150 @@ contract StakingRewardsIntegrationTest is Test {
         vm.stopPrank();
     }
 
-    function test_Integration_LongAfterPeriodFinish_NewFundingDoesNotUseHistoricalBalance() public {}
+    function test_Integration_LongAfterPeriodFinish_NewFundingDoesNotUseHistoricalBalance() public {
+        uint256 firstRewardAmount = REWARD_DURATION;
+        uint256 donation = 1234;
+        uint256 secondRewardAmount = 3 * REWARD_DURATION;
 
-    function test_Integration_WhenPaused_OwnerCanRunSafetyOperations() public {}
+        _fundAndNotify(firstRewardAmount);
+        uint256 firstFinish = stakingRewards.periodFinish();
+        vm.warp(firstFinish + 30 days);
+        rewardToken.mint(address(stakingRewards), donation);
+        stakingRewards.syncUnallocatedRewards();
+        
+        assertEq (stakingRewards.accountedRewardBalance(), firstRewardAmount + donation);
+        assertEq (stakingRewards.unallocatedRewards(), donation);
+        assertEq (stakingRewards.scheduledRewards(), firstRewardAmount);
 
-    function test_Integration_multipleTopUpAcrossPeriods_UsesLeftoverCorrectly() public {}
+        _fundAndNotify(secondRewardAmount);
+        uint256 expectedSecondRate = secondRewardAmount / REWARD_DURATION;
+        uint256 expectedSecondScheduled = expectedSecondRate * REWARD_DURATION;
+        uint256 expectedSecondDust = secondRewardAmount - expectedSecondScheduled;
+
+        assertEq (stakingRewards.rewardRate(), expectedSecondRate);
+        assertEq (stakingRewards.scheduledRewards(), expectedSecondScheduled);
+        assertEq (stakingRewards.unallocatedRewards(), firstRewardAmount + donation + expectedSecondDust);
+        assertEq (stakingRewards.accountedRewardBalance(), firstRewardAmount + donation + secondRewardAmount);
+        assertEq (stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
+        assertEq (rewardToken.balanceOf(address(stakingRewards)), firstRewardAmount + donation + secondRewardAmount);
+    }
+
+    function test_Integration_WhenPaused_OwnerCanRunSafetyOperations() public {
+        uint256 newDuration = 14 days;
+        address newManager = makeAddr("newManager");
+        address newGuardian = makeAddr("newGuardian");
+        uint256 rewardDonation = 500;
+        uint256 excessStakeToken = 300;
+        uint256 recoveryAmount = 200;
+        MockERC20 otherToken = new MockERC20("OtherToken", "OTK", 18);
+
+        vm.prank(guardian);
+        stakingRewards.pause(bytes32("guardian pause"));
+
+        assertTrue (stakingRewards.paused());
+
+        stakingToken.mint(alice, 1);
+        vm.startPrank(alice);
+        stakingToken.approve(address(stakingRewards), 1);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        stakingRewards.stake(1);
+        vm.stopPrank();
+
+        rewardToken.mint(rewardManager, REWARD_DURATION);
+        vm.startPrank(rewardManager);
+        rewardToken.approve(address(stakingRewards), REWARD_DURATION);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        stakingRewards.fundAndNotify(REWARD_DURATION);
+        vm.stopPrank();
+
+        vm.startPrank(initialOwner);
+        stakingRewards.setRewardsDuration(newDuration);
+        stakingRewards.setRewardManager(newManager);
+        stakingRewards.setGuardian(newGuardian);
+        stakingRewards.setSweepRecipientAllowed(treasury, true);
+        stakingRewards.setSweepRecipientAllowed(recoveryRecipient, true);
+        vm.stopPrank();
+
+        assertEq (stakingRewards.rewardsDuration(), newDuration);
+        assertEq (stakingRewards.rewardManager(), newManager);
+        assertEq (stakingRewards.guardian(), newGuardian);
+        assertTrue (stakingRewards.sweepRecipientAllowed(treasury));
+        assertTrue (stakingRewards.sweepRecipientAllowed(recoveryRecipient));
+        assertTrue (stakingRewards.paused());
+
+        rewardToken.mint(address(stakingRewards), rewardDonation);
+        stakingRewards.syncUnallocatedRewards();
+
+        vm.prank(initialOwner);
+        stakingRewards.sweepUnallocatedRewards(treasury, rewardDonation);
+        assertEq (rewardToken.balanceOf(treasury), rewardDonation);
+
+        stakingToken.mint(address(stakingRewards), excessStakeToken);
+        vm.prank(initialOwner);
+        stakingRewards.recoverExcessStakingToken(recoveryRecipient, excessStakeToken);
+        assertEq (stakingToken.balanceOf(recoveryRecipient), excessStakeToken);
+
+        otherToken.mint(address(stakingRewards), recoveryAmount);
+        vm.prank(initialOwner);
+        stakingRewards.recoverERC20(address(otherToken), recoveryRecipient, recoveryAmount);
+        assertEq (otherToken.balanceOf(recoveryRecipient), recoveryAmount);
+        
+        vm.prank(initialOwner);
+        stakingRewards.unpause();
+        assertFalse (stakingRewards.paused());
+    }
+
+    function test_Integration_multipleTopUpAcrossPeriods_UsesLeftoverCorrectly() public {
+    uint256 stakeAmount = 1000;
+    uint256 firstRewardAmount = 10 * REWARD_DURATION;
+    uint256 secondRewardAmount = 5 * REWARD_DURATION;
+    uint256 thirdRewardAmount = 2 * REWARD_DURATION;
+    uint256 expectedUnallocatedRewards;
+
+    _stake(alice, stakeAmount);
+    _fundAndNotify(firstRewardAmount);
+
+    {
+        uint256 firstRate = stakingRewards.rewardRate();
+        uint256 firstFinish = stakingRewards.periodFinish();
+
+        vm.warp(block.timestamp + 1 days);
+
+        uint256 leftoverBeforeSecond = (firstFinish - block.timestamp) * firstRate;
+        uint256 grossSecondRewards = secondRewardAmount + leftoverBeforeSecond;
+        uint256 expectedSecondRate = grossSecondRewards / REWARD_DURATION;
+        uint256 expectedSecondScheduled = expectedSecondRate * REWARD_DURATION;
+        uint256 expectedSecondDust = grossSecondRewards - expectedSecondScheduled;
+
+        expectedUnallocatedRewards = stakingRewards.unallocatedRewards() + expectedSecondDust;
+
+        _fundAndNotify(secondRewardAmount);
+
+        assertEq(stakingRewards.rewardRate(), expectedSecondRate);
+        assertEq(stakingRewards.scheduledRewards(), expectedSecondScheduled);
+        assertEq(stakingRewards.unallocatedRewards(), expectedUnallocatedRewards);
+        assertEq(stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
+    }
+
+    vm.warp(stakingRewards.periodFinish() + 3 days);
+
+    _fundAndNotify(thirdRewardAmount);
+
+    {
+        uint256 expectedThirdRate = thirdRewardAmount / REWARD_DURATION;
+        uint256 expectedThirdScheduled = expectedThirdRate * REWARD_DURATION;
+        uint256 expectedThirdDust = thirdRewardAmount - expectedThirdScheduled;
+
+        expectedUnallocatedRewards += expectedThirdDust;
+
+        assertEq(stakingRewards.rewardRate(), expectedThirdRate);
+        assertEq(stakingRewards.scheduledRewards(), expectedThirdScheduled);
+        assertEq(stakingRewards.unallocatedRewards(), expectedUnallocatedRewards);
+    }
+
+    assertEq(stakingRewards.accountedRewardBalance(), firstRewardAmount + secondRewardAmount + thirdRewardAmount);
+    assertEq(stakingRewards.periodFinish(), block.timestamp + REWARD_DURATION);
+}
 
     function test_Integration_DonationSyncSweep_DoesNotAffectUserClaimableRewards() public {
         uint256 stakeAmount = 1000;

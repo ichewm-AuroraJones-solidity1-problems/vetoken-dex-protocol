@@ -24,6 +24,7 @@ contract StakingRewardsFuzzTest is Test {
     address public treasury = makeAddr("treasury");
     address public recoveryRecipient = makeAddr("recoveryRecipient");
     address public alice = makeAddr("alice");
+    address public bob = makeAddr("bob");
 
     /// @notice Emitted when a user stakes tokens.
     event Staked(address indexed user, uint256 amount);
@@ -164,15 +165,16 @@ contract StakingRewardsFuzzTest is Test {
         elapsed = bound(elapsed, 1, REWARD_DURATION);
 
         _stake(alice, stakeAmount);
-
         _fundAndNotify(rewardAmount);
-        uint256 beforeEarned = stakingRewards.earned(alice);
 
         vm.warp(block.timestamp + elapsed);
-        uint256 afterEarned = stakingRewards.earned(alice);
 
-        assertGe(afterEarned, beforeEarned);
-        assertGe(stakingRewards.accountedRewardBalance(), afterEarned);
+        uint256 rewardRate = rewardAmount / REWARD_DURATION;
+        uint256 released = rewardRate * elapsed;
+        uint256 expected = _expectedEarnedFromSegment(released, stakeAmount, stakeAmount);
+
+        assertEq (stakingRewards.earned(alice), expected);
+        assertLe (expected, released); 
     }
 
     function testFuzz_GetReward_PaysAtMostEarned(uint256 stakeAmount, uint256 rewardAmount, uint256 elapsed) public {
@@ -181,18 +183,19 @@ contract StakingRewardsFuzzTest is Test {
         elapsed = bound(elapsed, 1, REWARD_DURATION);
 
         _stake(alice, stakeAmount);
-
         _fundAndNotify(rewardAmount);
 
         vm.warp(block.timestamp + elapsed);
-        uint256 totalEarned = stakingRewards.earned(alice);
+        uint256 rewardRate = rewardAmount / REWARD_DURATION;
+        uint256 released = rewardRate * elapsed;
+        uint256 expected = _expectedEarnedFromSegment(released, stakeAmount, stakeAmount);
 
         vm.prank(alice);
         stakingRewards.getReward();
 
         assertEq(stakingRewards.balanceOf(alice), stakeAmount);
         assertEq(stakingRewards.earned(alice), 0);
-        assertEq(rewardToken.balanceOf(alice), totalEarned);
+        assertEq(rewardToken.balanceOf(alice), expected);
     }
 
     function testFuzz_SweepUnallocated_CannotSweepMoreThanSweepable(
@@ -307,6 +310,35 @@ contract StakingRewardsFuzzTest is Test {
         assertApproxEqAbs(stakingRewards.unallocatedRewards(), beforeUnallocatedRewards + beforeRewards, 1e12);
     }
 
+    function testFuzz_MultipleUserUnequalStake_DistributesByStoredRewardPerToken(
+        uint256 stakeAmountAlice,
+        uint256 stakeAmountBob,
+        uint256 rewardAmount,
+        uint256 elapsed
+    ) public {
+        stakeAmountAlice = bound(stakeAmountAlice, 1, 1e24);
+        stakeAmountBob = bound(stakeAmountBob, 1, 1e24);
+        rewardAmount = bound(rewardAmount, REWARD_DURATION, 1e30);
+        elapsed = bound(elapsed, 1, REWARD_DURATION);
+
+        _stake(alice, stakeAmountAlice);
+        _stake(bob, stakeAmountBob);
+        _fundAndNotify(rewardAmount);
+
+        vm.warp(block.timestamp + elapsed);
+
+        uint256 rewardRate = rewardAmount / REWARD_DURATION;
+        uint256 released = rewardRate * elapsed;
+        uint256 totalStaked = stakeAmountAlice + stakeAmountBob;
+
+        uint256 expectedAlice = _expectedEarnedFromSegment(released, stakeAmountAlice, totalStaked);
+        uint256 expectedBob = _expectedEarnedFromSegment(released, stakeAmountBob, totalStaked);
+
+        assertEq (stakingRewards.earned(alice), expectedAlice);
+        assertEq (stakingRewards.earned(bob), expectedBob);
+        assertLe (expectedAlice + expectedBob, released);
+    }
+
     // =====================================internal functions ==========================
 
     function _stake(address user, uint256 amount) internal {
@@ -323,5 +355,16 @@ contract StakingRewardsFuzzTest is Test {
         rewardToken.approve(address(stakingRewards), amount);
         stakingRewards.fundAndNotify(amount);
         vm.stopPrank();
+    }
+
+    function _expectedEarnedFromSegment(
+        uint256 released,
+        uint256 userStake,
+        uint256 totalStake
+    ) internal pure returns (uint256) {
+        if (totalStake == 0) return 0;
+
+        uint256 rpt = Math.mulDiv(released, 1e18, totalStake);
+        return Math.mulDiv(userStake, rpt, 1e18);
     }
 }

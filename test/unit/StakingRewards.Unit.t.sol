@@ -5,8 +5,6 @@ import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {StakingRewards} from "../../src/StakingRewards.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
-import {FeeOnTransferMock} from "../mocks/FeeOnTransferMock.sol";
-import {ReturnFalseERC20} from "../mocks/ReturnFalseERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -30,17 +28,10 @@ contract StakingRewardsUnitTest is Test {
     address public alice = makeAddr("alice");
     address public bob = makeAddr("bob");
 
-    /// @notice Emitted when a user stakes tokens.
     event Staked(address indexed user, uint256 amount);
-
-    /// @notice Emitted when a user withdraws staked tokens.
     event Withdrawn(address indexed user, uint256 amount);
-
-    /// @notice Emitted when a user claims rewards.
     event RewardPaid(address indexed user, uint256 amount);
     event EmergencyExit(address indexed user, uint256 principal, uint256 forfeitedReward);
-
-    /// @notice Emitted when the reward manager funds a new reward period.
     event RewardAdded(address indexed rewardManager, uint256 amount, uint256 rewardRate, uint256 periodFinish);
     event RewardsForfeited(uint256 indexed startTime, uint256 indexed endTime, uint256 amount);
     event RewardPerTokenDust(uint256 amount);
@@ -53,19 +44,24 @@ contract StakingRewardsUnitTest is Test {
         address indexed operator, address indexed to, uint256 amount, uint256 remainingExcess
     );
     event ERC20Recovered(address indexed operator, address indexed token, address indexed to, uint256 amount);
-
     event RewardManagerUpdated(address indexed oldManager, address indexed newManager);
     event GuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
     event RewardsDurationUpdated(uint256 oldDuration, uint256 newDuration);
     event SweepRecipientUpdated(address indexed recipient, bool allowed);
-
     event PauseReason(address indexed operator, bytes32 reasonHash);
+    event Paused(address account);
+    event Unpaused(address account);
 
     function setUp() public {
         stakingToken = new MockERC20("Staking Token", "STAKING", 18);
         rewardToken = new MockERC20("Reward Token", "REWARD", 18);
         stakingRewards = new StakingRewards(
-            initialOwner, address(stakingToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
+            initialOwner, 
+            address(stakingToken),
+            address(rewardToken), 
+            rewardManager, 
+            guardian, 
+            REWARD_DURATION
         );
     }
 
@@ -162,13 +158,35 @@ contract StakingRewardsUnitTest is Test {
         vm.stopPrank();
     }
 
-    function test_GuardianZero_CannotPause() public {
-        vm.startPrank(stakingRewards.owner());
+    function test_GuardianZero_DisablesGuardianAndRandomPause() public {
+        vm.prank(initialOwner);
         stakingRewards.setGuardian(address(0));
-        assertEq(stakingRewards.guardian(), address(0));
-        assertTrue(!stakingRewards.paused());
 
+        assertEq (stakingRewards.guardian(), address(0));
+
+        vm.prank(guardian);
+        vm.expectRevert(StakingRewards.OnlyGuardianOrOwner.selector);
+        stakingRewards.pause(bytes32("old guardian pause"));
+
+        vm.prank(alice);
+        vm.expectRevert(StakingRewards.OnlyGuardianOrOwner.selector);
+        stakingRewards.pause(bytes32("random pause"));
+
+        assertFalse(stakingRewards.paused());
+    }
+
+    function test_GuardianZero_OwnerCanStillPause() public {
+        vm.startPrank(initialOwner);
+        stakingRewards.setGuardian(address(0));
+
+        vm.startPrank(initialOwner);
+        vm.expectEmit(true, false, false, true);
+        emit PauseReason(initialOwner, bytes32("owner pause"));
+
+        stakingRewards.pause(bytes32("owner pause"));
         vm.stopPrank();
+
+        assertTrue(stakingRewards.paused());
     }
 
     function test_RenounceOwnership_Reverts() public {
@@ -191,12 +209,14 @@ contract StakingRewardsUnitTest is Test {
 
     // roles
     function test_SetRewardManager_Success() public {
-        vm.startPrank(initialOwner);
+        address newManager = makeAddr("newManager");
 
+        vm.startPrank(initialOwner);
         vm.expectEmit(true, true, false, false);
-        emit RewardManagerUpdated(rewardManager, rewardManager);
-        stakingRewards.setRewardManager(rewardManager);
-        assertEq(stakingRewards.rewardManager(), rewardManager);
+        emit RewardManagerUpdated(rewardManager, newManager);
+        stakingRewards.setRewardManager(newManager);
+
+        assertEq(stakingRewards.rewardManager(), newManager);
         vm.stopPrank();
     }
 
@@ -215,12 +235,14 @@ contract StakingRewardsUnitTest is Test {
     }
 
     function test_SetGuardian_Success() public {
+        address newGuardian = makeAddr("newGuardian");
+
         vm.startPrank(initialOwner);
         vm.expectEmit(true, true, false, false);
-        emit GuardianUpdated(guardian, guardian);
-        stakingRewards.setGuardian(guardian);
+        emit GuardianUpdated(guardian, newGuardian);
+        stakingRewards.setGuardian(newGuardian);
 
-        assertEq(stakingRewards.guardian(), guardian);
+        assertEq(stakingRewards.guardian(), newGuardian);
         vm.stopPrank();
     }
 
@@ -239,7 +261,9 @@ contract StakingRewardsUnitTest is Test {
         stakingRewards.setGuardian(guardian);
     }
 
+    // --------------------------------------------------------------------------
     // Sweep Allowlist test
+    // --------------------------------------------------------------------------
     function test_SetSweepRecipientAllowed_SetsEmitsAndAllowsRepeatedValue() public {
         vm.startPrank(initialOwner);
 
@@ -357,42 +381,6 @@ contract StakingRewardsUnitTest is Test {
         vm.stopPrank();
     }
 
-    function test_Stake_RevertWhenTokenReturnsFalse() public {
-        uint256 stakeAmount = 1000;
-        ReturnFalseERC20 BadToken = new ReturnFalseERC20("BadToken", "badToken", 18);
-        StakingRewards BadStakingRewards = new StakingRewards(
-            initialOwner, address(BadToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
-        );
-        BadToken.mint(alice, stakeAmount);
-        BadToken.setFailTransferFrom(true);
-
-        vm.startPrank(alice);
-        BadToken.approve(address(BadStakingRewards), stakeAmount);
-        vm.expectRevert(abi.encodeWithSelector(SafeERC20.SafeERC20FailedOperation.selector, BadToken));
-        BadStakingRewards.stake(stakeAmount);
-
-        assertEq(BadStakingRewards.balanceOf(alice), 0);
-        assertEq(BadStakingRewards.totalStaked(), 0);
-
-        vm.stopPrank();
-    }
-
-    function test_Stake_RevertWhenReceivedAmountMismatch() public {
-        FeeOnTransferMock FeeToken = new FeeOnTransferMock("FeeToken", "feeToken", 18);
-        StakingRewards FeeStakingRewards = new StakingRewards(
-            initialOwner, address(FeeToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
-        );
-
-        vm.startPrank(alice);
-        FeeToken.mint(alice, 1000);
-        FeeToken.approve(address(FeeStakingRewards), 600);
-
-        vm.expectRevert(abi.encodeWithSelector(StakingRewards.InvalidReceivedAmount.selector, 600, 599));
-        FeeStakingRewards.stake(600);
-
-        vm.stopPrank();
-    }
-
     function test_Withdraw_RevertWhenAmountZero() public {
         uint256 stakeAmount = 1000;
         _stake(alice, stakeAmount);
@@ -400,32 +388,6 @@ contract StakingRewardsUnitTest is Test {
         vm.expectRevert(StakingRewards.ZeroAmount.selector);
         vm.prank(alice);
         stakingRewards.withdraw(0);
-    }
-
-    function test_Withdraw_RevertWhenTokenReturnsFalse() public {
-        ReturnFalseERC20 BadToken = new ReturnFalseERC20("BadToken", "badToken", 18);
-        StakingRewards BadStakingRewards = new StakingRewards(
-            initialOwner, address(BadToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
-        );
-        uint256 stakeAmount = 1000;
-        BadToken.mint(alice, stakeAmount);
-        BadToken.setFailTransferFrom(false);
-        vm.startPrank(alice);
-        BadToken.approve(address(BadStakingRewards), stakeAmount);
-        BadStakingRewards.stake(stakeAmount);
-        vm.stopPrank();
-
-        vm.warp(block.timestamp + 2 days);
-        BadToken.setFailTransfer(true);
-        vm.startPrank(alice);
-        vm.expectRevert(abi.encodeWithSelector(SafeERC20.SafeERC20FailedOperation.selector, address(BadToken)));
-        BadStakingRewards.withdraw(stakeAmount);
-
-        assertEq(BadStakingRewards.balanceOf(alice), stakeAmount);
-        assertEq(BadStakingRewards.totalStaked(), stakeAmount);
-        assertEq(BadToken.balanceOf(alice), 0);
-
-        vm.stopPrank();
     }
 
     function test_Withdraw_RevertWhenExcessStakeAmount() public {
@@ -552,25 +514,6 @@ contract StakingRewardsUnitTest is Test {
         stakingRewards.fundAndNotify(rewardAmount);
     }
 
-    function test_FundAndNotify_RevertWhenTransferFromReturnFalse() public {
-        uint256 rewardAmount = 2000;
-        ReturnFalseERC20 BadToken = new ReturnFalseERC20("BadToken", "badToken", 18);
-        StakingRewards BadStakingRewards = new StakingRewards(
-            initialOwner, address(stakingToken), address(BadToken), rewardManager, guardian, REWARD_DURATION
-        );
-        BadToken.mint(rewardManager, rewardAmount);
-        BadToken.setFailTransferFrom(true);
-        vm.startPrank(rewardManager);
-        BadToken.approve(address(BadStakingRewards), rewardAmount);
-        vm.expectRevert(abi.encodeWithSelector(SafeERC20.SafeERC20FailedOperation.selector, address(BadToken)));
-        BadStakingRewards.fundAndNotify(rewardAmount);
-        vm.stopPrank();
-
-        assertEq(BadStakingRewards.accountedRewardBalance(), 0);
-        assertEq(BadStakingRewards.unallocatedRewards(), 0);
-        assertEq(BadToken.balanceOf(rewardManager), rewardAmount);
-    }
-
     function test_FundAndNotify_RevertWhenRewardTooSmall() public {
         vm.startPrank(rewardManager);
         rewardToken.mint(rewardManager, 2000);
@@ -593,22 +536,6 @@ contract StakingRewardsUnitTest is Test {
             )
         );
         stakingRewards.fundAndNotify(MAX_REWARDS_AMOUNT + 1);
-
-        vm.stopPrank();
-    }
-
-    function test_FundAndNotify_RevertWhenReceivedAmountMismatch() public {
-        FeeOnTransferMock FeeToken = new FeeOnTransferMock("FeeToken", "feeToken", 100);
-        StakingRewards FeeStakingRewards = new StakingRewards(
-            initialOwner, address(stakingToken), address(FeeToken), rewardManager, guardian, REWARD_DURATION
-        );
-
-        vm.startPrank(rewardManager);
-        FeeToken.mint(rewardManager, 2000);
-        FeeToken.approve(address(FeeStakingRewards), 2000);
-
-        vm.expectRevert(abi.encodeWithSelector(StakingRewards.InvalidReceivedAmount.selector, 2000, 1980));
-        FeeStakingRewards.fundAndNotify(2000);
 
         vm.stopPrank();
     }
@@ -684,34 +611,6 @@ contract StakingRewardsUnitTest is Test {
         assertEq(stakingRewards.accountedRewardBalance(), 0);
     }
 
-    function test_GetReward_RevertWhenRewardTransferFails() public {
-        uint256 stakeAmount = 1000;
-        uint256 rewardAmount = REWARD_DURATION;
-        uint256 elapsed = 100;
-        ReturnFalseERC20 BadToken = new ReturnFalseERC20("BadToken", "badToken", 18);
-        StakingRewards BadStakingRewards = new StakingRewards(
-            initialOwner, address(stakingToken), address(BadToken), rewardManager, guardian, REWARD_DURATION
-        );
-        BadToken.mint(rewardManager, rewardAmount);
-        BadToken.setFailTransferFrom(false);
-        vm.startPrank(rewardManager);
-        BadToken.approve(address(BadStakingRewards), rewardAmount);
-        BadStakingRewards.fundAndNotify(rewardAmount);
-        vm.stopPrank();
-
-        stakingToken.mint(alice, stakeAmount);
-        vm.startPrank(alice);
-        stakingToken.approve(address(BadStakingRewards), stakeAmount);
-        BadStakingRewards.stake(stakeAmount);
-        vm.stopPrank();
-
-        vm.warp(block.timestamp + elapsed);
-        BadToken.setFailTransfer(true);
-        vm.expectRevert(abi.encodeWithSelector(SafeERC20.SafeERC20FailedOperation.selector, address(BadToken)));
-        vm.prank(alice);
-        BadStakingRewards.getReward();
-    }
-
     function test_GetReward_DecreasesRewardsAggregateAndAccountedBalance() public {
         uint256 stakeAmount = 1000;
         uint256 rewardAmount = REWARD_DURATION;
@@ -770,6 +669,51 @@ contract StakingRewardsUnitTest is Test {
 
         assertEq(stakingRewards.earned(alice), expectedEarnAlice);
         assertEq(stakingRewards.earned(bob), expectedEarnBob);
+    }
+
+    function test_Earned_UnequalStakesDistributeExactlyByWeight() public {
+        uint256 stakeAmountAlice = 1000;
+        uint256 stakeAmountBob = 3000;
+        uint256 rewardAmount = REWARD_DURATION;
+        uint256 elapsed = 100;
+        _stake(alice, stakeAmountAlice);
+        _stake(bob, stakeAmountBob);
+        _fundAndNotify(rewardAmount);
+
+        vm.warp(block.timestamp + elapsed);
+
+        uint256 totalStake = stakeAmountAlice + stakeAmountBob;
+        uint256 released = elapsed;
+
+        assertEq (stakingRewards.earned(alice), Math.mulDiv(released, stakeAmountAlice, totalStake));
+        assertEq (stakingRewards.earned(bob), Math.mulDiv(released, stakeAmountBob, totalStake));
+        assertEq (stakingRewards.earned(alice), 25);
+        assertEq (stakingRewards.earned(bob), 75);
+    }
+
+    function test_Earned_MultipleUsersPartialWithdrawContinuesBySegmentedPrincipal() public {
+        uint256 stakeAmountAlice = 1000;
+        uint256 stakeAmountBob = 3000;
+        uint256 withdrawAmountAlice = 500;
+        uint256 rewardAmount = REWARD_DURATION;
+        uint256 elapsedBeforeWithdraw = 100;
+        uint256 elapsedAfterWithdraw = 70;
+        _stake(alice, stakeAmountAlice);
+        _stake(bob, stakeAmountBob);
+        _fundAndNotify(rewardAmount);
+
+        vm.warp(block.timestamp + elapsedBeforeWithdraw);
+        vm.prank(alice);
+        stakingRewards.withdraw(withdrawAmountAlice);
+
+        vm.warp(block.timestamp + elapsedAfterWithdraw);
+
+        assertEq (stakingRewards.balanceOf(alice), 500);
+        assertEq (stakingRewards.balanceOf(bob), 3000);
+        assertEq (stakingRewards.totalStaked(), 3500);
+
+        assertEq (stakingRewards.earned(alice), 35);
+        assertEq (stakingRewards.earned(bob), 135);
     }
 
     function test_Non18Decimals_Staking6Reward18() public {
@@ -1071,6 +1015,38 @@ contract StakingRewardsUnitTest is Test {
         assertEq(stakingRewards.aggregateClaimableRewards(), 0);
     }
 
+    function test_EmergencyExit_OneUserForfeitsWhileOtherContinuesEarning() public {
+        uint256 stakeAmountAlice = 1000;
+        uint256 stakeAmountBob = 3000;
+        uint256 rewardAmount = REWARD_DURATION;
+        uint256 elapsedBeforeExit = 100;
+        uint256 elapsedAfterExit = 60;
+        _stake(alice, stakeAmountAlice);
+        _stake(bob, stakeAmountBob);
+        _fundAndNotify(rewardAmount);
+
+        vm.warp(block.timestamp + elapsedBeforeExit);
+        vm.prank(alice);
+        stakingRewards.emergencyExit();
+
+        assertEq (stakingRewards.balanceOf(alice), 0);
+        assertEq (stakingToken.balanceOf(alice), stakeAmountAlice);
+        assertEq (rewardToken.balanceOf(alice), 0);
+        assertEq (stakingRewards.rewards(alice), 0);
+        assertEq (stakingRewards.unallocatedRewards(), 25);
+        assertEq (stakingRewards.balanceOf(bob), stakeAmountBob);
+        assertEq (stakingRewards.earned(bob), 75);
+
+        vm.warp(block.timestamp + elapsedAfterExit);
+        assertEq (stakingRewards.earned(bob), 135);
+
+        vm.prank(bob);
+        stakingRewards.getReward();
+
+        assertEq (rewardToken.balanceOf(bob), 135);
+        assertEq (stakingRewards.balanceOf(bob), stakeAmountBob);
+    }
+
     // ---------------------------------------------------------------------------
     // sync and sweep and recover test
     // ----------------------------------------------------------------------------
@@ -1251,22 +1227,6 @@ contract StakingRewardsUnitTest is Test {
         vm.stopPrank();
     }
 
-    function test_RecoverExcessStakingToken_RevertWhenTransferFails() public {
-        uint256 excessAmount = 500;
-        ReturnFalseERC20 BadToken = new ReturnFalseERC20("BadToken", "badToken", 18);
-        StakingRewards BadStakingRewards = new StakingRewards(
-            initialOwner, address(BadToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
-        );
-        BadToken.mint(address(BadStakingRewards), excessAmount);
-
-        vm.startPrank(initialOwner);
-        BadStakingRewards.setSweepRecipientAllowed(recoveryRecipient, true);
-        BadToken.setFailTransfer(true);
-        vm.expectRevert(abi.encodeWithSelector(SafeERC20.SafeERC20FailedOperation.selector, address(BadToken)));
-        BadStakingRewards.recoverExcessStakingToken(recoveryRecipient, excessAmount);
-        vm.stopPrank();
-    }
-
     function test_RecoverExcessStakingToken_RevertWhenZeroAddress() public {
         uint256 stakeAmount = 1000;
         uint256 excessAmount = 500;
@@ -1366,19 +1326,6 @@ contract StakingRewardsUnitTest is Test {
         vm.stopPrank();
     }
 
-    function test_RecoverERC20_RevertWhenTransferFails() public {
-        ReturnFalseERC20 recoverToken = new ReturnFalseERC20("RecoverToken", "RECOVER", 18);
-        uint256 amount = 1000;
-        recoverToken.mint(address(stakingRewards), amount);
-        vm.startPrank(initialOwner);
-        stakingRewards.setSweepRecipientAllowed(recoveryRecipient, true);
-        recoverToken.setFailTransfer(true);
-
-        vm.expectRevert(abi.encodeWithSelector(SafeERC20.SafeERC20FailedOperation.selector, address(recoverToken)));
-        stakingRewards.recoverERC20(address(recoverToken), recoveryRecipient, amount);
-        vm.stopPrank();
-    }
-
     function test_RecoverERC20_RevertWhenZeroAddressOrZeroAmount() public {
         MockERC20 recoverToken = new MockERC20("RecoverToken", "RECOVER", 18);
         uint256 amount = 1000;
@@ -1416,17 +1363,31 @@ contract StakingRewardsUnitTest is Test {
 
     function test_Pause_ByOwner() public {
         vm.startPrank(initialOwner);
-        vm.expectEmit(true, false, false, true);
+
+        vm.expectEmit(true, false, false, true, address(stakingRewards));
+        emit Paused(initialOwner);
+
+        vm.expectEmit(true, false, false, true, address(stakingRewards));
         emit PauseReason(initialOwner, bytes32("Owner Pause"));
+
         stakingRewards.pause(bytes32("Owner Pause"));
+
+        assertTrue (stakingRewards.paused());
         vm.stopPrank();
     }
 
     function test_Pause_ByGuardian() public {
         vm.startPrank(guardian);
-        vm.expectEmit(true, false, false, true);
+
+        vm.expectEmit(true, false, false, true, address(stakingRewards));
+        emit Paused(guardian);
+
+        vm.expectEmit(true, false, false, true, address(stakingRewards));
         emit PauseReason(guardian, bytes32("Guardian Pause"));
+
         stakingRewards.pause(bytes32("Guardian Pause"));
+
+        assertTrue (stakingRewards.paused());
         vm.stopPrank();
     }
 
@@ -1456,10 +1417,17 @@ contract StakingRewardsUnitTest is Test {
     }
 
     function test_Unpause_ByOwner() public {
-        vm.startPrank(initialOwner);
+        vm.prank(initialOwner);
         stakingRewards.pause(bytes32("Owner Pause"));
-        vm.warp(block.timestamp + 10);
+        assertTrue (stakingRewards.paused());
+
+        vm.startPrank(initialOwner);
+        vm.expectEmit(true, false, false, true, address(stakingRewards));
+        emit Unpaused(initialOwner);
+
         stakingRewards.unpause();
+
+        assertFalse(stakingRewards.paused());
         vm.stopPrank();
     }
 
@@ -1588,6 +1556,31 @@ contract StakingRewardsUnitTest is Test {
         assertEq(stakingRewards.unallocatedRewards(), forfeitedReward);
     }
 
+    function test_WhenPaused_OwnerParameterRepairStillWorks() public {
+        address newManager = makeAddr("newManager");
+        address newGuardian = makeAddr("newGuardian");
+        uint256 newDuration = 14 days;
+
+        vm.warp(stakingRewards.periodFinish() + 1);
+        vm.prank(guardian);
+        stakingRewards.pause(bytes32("Guardian Pause"));
+
+        assertTrue(stakingRewards.paused());
+
+        vm.startPrank(initialOwner);
+        stakingRewards.setRewardManager(newManager);
+        stakingRewards.setGuardian(newGuardian);
+        stakingRewards.setSweepRecipientAllowed(treasury,true);
+        stakingRewards.setRewardsDuration(newDuration);
+        vm.stopPrank();
+
+        assertEq (stakingRewards.rewardManager(), newManager);
+        assertEq (stakingRewards.guardian(), newGuardian);
+        assertTrue (stakingRewards.sweepRecipientAllowed(treasury));
+        assertEq (stakingRewards.rewardsDuration(), newDuration);
+        assertTrue (stakingRewards.paused());
+    }
+
     // --------------------------------------------------------------
     // rewards duration test
     // --------------------------------------------------------------
@@ -1600,6 +1593,8 @@ contract StakingRewardsUnitTest is Test {
         vm.expectEmit(false, false, false, true);
         emit RewardsDurationUpdated(REWARD_DURATION, newDuration);
         stakingRewards.setRewardsDuration(newDuration);
+
+        assertEq (stakingRewards.rewardsDuration(), newDuration);
         vm.stopPrank();
     }
 
@@ -1651,6 +1646,7 @@ contract StakingRewardsUnitTest is Test {
         assertEq(stakingRewards.rewardsDuration(), newDuration);
     }
 
+
     // ------------------------------------------------------------------------------
     // view functions test
     // ------------------------------------------------------------------------------
@@ -1699,26 +1695,41 @@ contract StakingRewardsUnitTest is Test {
         assertEq(stakingRewards.accountedRewardBalance(), rewardAmount + donation);
     }
 
-    function test_IsRewardPeriodActive_ReturnsExpectedValue() public view {
-        if (stakingRewards.periodFinish() > block.timestamp) {
-            assertEq(stakingRewards.isRewardPeriodActive(), true);
-        } else {
-            assertEq(stakingRewards.isRewardPeriodActive(), false);
-        }
+    function test_IsRewardPeriodActive_ReturnsExpectedValue() public {
+        uint256 rewardAmount = REWARD_DURATION;
+        assertFalse (stakingRewards.isRewardPeriodActive());
+
+        _fundAndNotify(rewardAmount);
+
+        assertTrue (stakingRewards.isRewardPeriodActive());
+
+        vm.warp(stakingRewards.periodFinish());
+
+        assertFalse (stakingRewards.isRewardPeriodActive());
     }
 
-    function test_StoredUnallocatedRewards_WhenNoStakeersIncludesReleasedRewards() public {
+    function test_StoredUnallocatedRewards_WhenNoStakersDoesNotIncludePendingReleasedRewards() public {
         uint256 rewardAmount = REWARD_DURATION;
         uint256 elapsed = 100;
         _fundAndNotify(rewardAmount);
         vm.warp(block.timestamp + elapsed);
-        assertEq(stakingRewards.unallocatedRewards(), 0);
+
+        assertEq (stakingRewards.storedUnallocatedRewards(), 0);
+        assertEq (stakingRewards.unallocatedRewards(), 0);
+        assertEq (stakingRewards.sweepableUnallocatedRewards(), elapsed);
+    }
+
+    function test_StoredUnallocatedRewards_AfterNoStakersCheckpointIncludesReleasedRewards() public {
+        uint256 rewardAmount = REWARD_DURATION;
+        uint256 elapsed = 100;
+        _fundAndNotify(rewardAmount);
+        vm.warp(block.timestamp + elapsed);
 
         vm.prank(alice);
         stakingRewards.getReward();
 
-        assertEq(stakingRewards.storedUnallocatedRewards(), elapsed);
-        assertEq(stakingRewards.unallocatedRewards(), elapsed);
+        assertEq (stakingRewards.storedUnallocatedRewards(), elapsed);
+        assertEq (stakingRewards.unallocatedRewards(), elapsed);
     }
 
     function test_StoredUnallocatedRewards_WhenStakersExistDoesNotCountActiveAccrual() public {

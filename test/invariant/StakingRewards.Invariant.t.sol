@@ -94,4 +94,24 @@ contract StakingRewardsInvariantTest is Test {
     function invariant_StoredUnallocatedNeverExceedsSweepable() public view {
         assertLe(stakingRewards.storedUnallocatedRewards(), stakingRewards.sweepableUnallocatedRewards());
     }
+
+    function invariant_RewardTokenConservation() public view {
+        uint256 inflows = handler.ghostFunds() + handler.ghostSynced();
+
+        uint256 outflowsAndBalance = 
+            handler.ghostClaimed()
+            + handler.ghostSwept()
+            + rewardToken.balanceOf(address(stakingRewards));
+        
+        assertEq (inflows, outflowsAndBalance);
+    }
+
+    function invariant_RewardPerTokenStoredMonotonic() public view {
+        assertTrue (handler.ghostRewardPerTokenStoredMonotonic());
+        assertGe (stakingRewards.rewardPerTokenStored(), handler.ghostLastRewardPerTokenStored());
+    }
+
+    function invariant_RewardPerTokenStoredStableWhenNoStake() public view {
+        assertTrue (handler.ghostRewardPerTokenStableWhenNoStake());
+    }
 }

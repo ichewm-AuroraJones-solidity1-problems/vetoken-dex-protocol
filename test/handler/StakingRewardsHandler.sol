@@ -30,6 +30,35 @@ contract StakingRewardsHandler is Test {
     uint256 public ghostClaimableBeforeSweep;
     uint256 public ghostClaimableAfterSweep;
 
+    uint256 public ghostLastRewardPerTokenStored;
+    bool public ghostRewardPerTokenStoredMonotonic = true;
+    bool public ghostRewardPerTokenStableWhenNoStake = true;
+
+    modifier trackRewardPerTokenStored() {
+        uint256 beforeRpt = stakingRewards.rewardPerTokenStored();
+        uint256 beforeTotalStaked = stakingRewards.totalStaked();
+
+        if (beforeRpt < ghostLastRewardPerTokenStored) {
+            ghostRewardPerTokenStoredMonotonic = false;
+        }
+
+        _;
+
+        uint256 afterRpt = stakingRewards.rewardPerTokenStored();
+
+        if (afterRpt < beforeRpt || afterRpt < ghostLastRewardPerTokenStored) {
+            ghostRewardPerTokenStoredMonotonic = false;
+        }
+
+        if (beforeTotalStaked == 0 && afterRpt != beforeRpt) {
+            ghostRewardPerTokenStableWhenNoStake = false;
+        }
+
+        if (afterRpt > ghostLastRewardPerTokenStored) {
+            ghostLastRewardPerTokenStored = afterRpt;
+        }
+    }
+
     constructor(
         StakingRewards _stakingRewards,
         MockERC20 _stakingToken,
@@ -48,13 +77,15 @@ contract StakingRewardsHandler is Test {
         actors.push(makeAddr("Alice"));
         actors.push(makeAddr("Bob"));
         actors.push(makeAddr("Charlie"));
+
+        ghostLastRewardPerTokenStored = stakingRewards.rewardPerTokenStored();
     }
 
     function _actor(uint256 actorSeed) internal view returns (address) {
         return actors[actorSeed % actors.length];
     }
 
-    function stake(uint256 actorSeed, uint256 amount) external {
+    function stake(uint256 actorSeed, uint256 amount) external trackRewardPerTokenStored {
         address actor = _actor(actorSeed);
         amount = bound(amount, 1, 1e24);
         stakingToken.mint(actor, amount);
@@ -67,7 +98,7 @@ contract StakingRewardsHandler is Test {
         ghostStakes += amount;
     }
 
-    function withdraw(uint256 actorSeed, uint256 amount) external {
+    function withdraw(uint256 actorSeed, uint256 amount) external trackRewardPerTokenStored {
         address actor = _actor(actorSeed);
 
         uint256 balance = stakingRewards.balanceOf(actor);
@@ -80,7 +111,7 @@ contract StakingRewardsHandler is Test {
         ghostWithdraws += amount;
     }
 
-    function getReward(uint256 actorSeed) external {
+    function getReward(uint256 actorSeed) external trackRewardPerTokenStored {
         address actor = _actor(actorSeed);
 
         uint256 beforeReward = rewardToken.balanceOf(actor);
@@ -92,7 +123,7 @@ contract StakingRewardsHandler is Test {
         ghostClaimed += claimed;
     }
 
-    function exit(uint256 actorSeed) external {
+    function exit(uint256 actorSeed) external trackRewardPerTokenStored {
         address actor = _actor(actorSeed);
 
         uint256 balance = stakingRewards.balanceOf(actor);
@@ -107,7 +138,7 @@ contract StakingRewardsHandler is Test {
         ghostClaimed += claimBalance;
     }
 
-    function emergencyExit(uint256 actorSeed) external {
+    function emergencyExit(uint256 actorSeed) external trackRewardPerTokenStored {
         address actor = _actor(actorSeed);
 
         uint256 balance = stakingRewards.balanceOf(actor);
@@ -118,7 +149,7 @@ contract StakingRewardsHandler is Test {
         ghostWithdraws += balance;
     }
 
-    function fundAndNotify(uint256 amount) external {
+    function fundAndNotify(uint256 amount) external trackRewardPerTokenStored {
         amount = bound(amount, stakingRewards.rewardsDuration(), 1e24);
         rewardToken.mint(rewardManager, amount);
 
@@ -130,12 +161,12 @@ contract StakingRewardsHandler is Test {
         ghostFunds += amount;
     }
 
-    function warp(uint256 secondsForward) external {
+    function warp(uint256 secondsForward) external trackRewardPerTokenStored {
         secondsForward = bound(secondsForward, 1, 30 days);
         vm.warp(block.timestamp + secondsForward);
     }
 
-    function syncUnallocatedRewards(uint256 amount) external {
+    function syncUnallocatedRewards(uint256 amount) external trackRewardPerTokenStored {
         amount = bound(amount, 1, 1e24);
         rewardToken.mint(address(stakingRewards), amount);
 
@@ -143,7 +174,7 @@ contract StakingRewardsHandler is Test {
         ghostSynced += amount;
     }
 
-    function sweepUnallocatedRewards(uint256 amount) external {
+    function sweepUnallocatedRewards(uint256 amount) external trackRewardPerTokenStored {
         uint256 sweepable = stakingRewards.sweepableUnallocatedRewards();
         if (sweepable == 0) return;
 
