@@ -11,12 +11,16 @@ contract StakingRewardsHandler is Test {
     StakingRewards stakingRewards;
     MockERC20 public stakingToken;
     MockERC20 public rewardToken;
+    MockERC20 public recoverToken;
 
     address public rewardManager;
     address public owner;
     address public recoveryRecipient;
+    address public guardian;
 
     address[] public actors;
+    address[] public rewardManagerCandidates;
+    address[] public guardianCandidates;
 
     uint256 public ghostStakes;
     uint256 public ghostWithdraws;
@@ -65,6 +69,7 @@ contract StakingRewardsHandler is Test {
         MockERC20 _rewardToken,
         address _rewardManager,
         address _owner,
+        address _guardian,
         address _recoveryRecipient
     ) {
         stakingRewards = _stakingRewards;
@@ -72,11 +77,23 @@ contract StakingRewardsHandler is Test {
         rewardToken = _rewardToken;
         rewardManager = _rewardManager;
         owner = _owner;
+        guardian = _guardian;
         recoveryRecipient = _recoveryRecipient;
+
+        recoverToken = new MockERC20("Recover Token", "RECOVER", 18);
 
         actors.push(makeAddr("Alice"));
         actors.push(makeAddr("Bob"));
         actors.push(makeAddr("Charlie"));
+
+        rewardManagerCandidates.push(_rewardManager);
+        rewardManagerCandidates.push(makeAddr("rewardManagerA"));
+        rewardManagerCandidates.push(makeAddr("rewardManagerB"));
+
+        guardianCandidates.push(_guardian);
+        guardianCandidates.push(makeAddr("guardianA"));
+        guardianCandidates.push(makeAddr("guardianB"));
+        guardianCandidates.push(address(0));
 
         ghostLastRewardPerTokenStored = stakingRewards.rewardPerTokenStored();
     }
@@ -86,6 +103,8 @@ contract StakingRewardsHandler is Test {
     }
 
     function stake(uint256 actorSeed, uint256 amount) external trackRewardPerTokenStored {
+        if (stakingRewards.paused()) return;
+
         address actor = _actor(actorSeed);
         amount = bound(amount, 1, 1e24);
         stakingToken.mint(actor, amount);
@@ -150,6 +169,8 @@ contract StakingRewardsHandler is Test {
     }
 
     function fundAndNotify(uint256 amount) external trackRewardPerTokenStored {
+        if (stakingRewards.paused()) return;
+
         amount = bound(amount, stakingRewards.rewardsDuration(), 1e24);
         rewardToken.mint(rewardManager, amount);
 
@@ -190,6 +211,62 @@ contract StakingRewardsHandler is Test {
         ghostPrincipalAfterSweep = _sumUserPrincipal();
         ghostClaimableAfterSweep = _sumUserClaimable();
         ghostSwept += amount;
+    }
+
+    function recoverExcessStakingToken(uint256 amount) external trackRewardPerTokenStored {
+        amount = bound(amount, 1, 1e24);
+
+        stakingToken.mint(address(stakingRewards), amount);
+
+        vm.startPrank(owner);
+        stakingRewards.setSweepRecipientAllowed(recoveryRecipient, true);
+        stakingRewards.recoverExcessStakingToken(recoveryRecipient, amount);
+        vm.stopPrank();
+    }
+
+    function recoverERC20(uint256 amount) external trackRewardPerTokenStored {
+        amount = bound(amount, 1, 1e24);
+
+        recoverToken.mint(address(stakingRewards), amount);
+
+        vm.startPrank(owner);
+        stakingRewards.setSweepRecipientAllowed(recoveryRecipient, true);
+        stakingRewards.recoverERC20(address(recoverToken), recoveryRecipient, amount);
+        vm.stopPrank();
+    }
+
+    function setRewardManager(uint256 seed) external trackRewardPerTokenStored {
+        address newManager = rewardManagerCandidates[seed % rewardManagerCandidates.length];
+
+        vm.prank(owner);
+        stakingRewards.setRewardManager(newManager);
+
+        rewardManager = newManager;
+    }
+
+    function setGuardian(uint256 seed) external trackRewardPerTokenStored {
+        address newGuardian = guardianCandidates[seed % guardianCandidates.length];
+
+        vm.prank(owner);
+        stakingRewards.setGuardian(newGuardian);
+
+        guardian = newGuardian;
+    }
+
+    function pause(uint256 seed) external trackRewardPerTokenStored {
+        if (stakingRewards.paused()) return;
+
+        address caller = (seed % 2 == 0 || guardian == address(0)) ? owner : guardian;
+
+        vm.prank(caller);
+        stakingRewards.pause(bytes32(seed));
+    }
+
+    function unpause() external trackRewardPerTokenStored {
+        if (!stakingRewards.paused()) return;
+
+        vm.prank(owner);
+        stakingRewards.unpause();
     }
 
     function actorCount() external view returns (uint256) {

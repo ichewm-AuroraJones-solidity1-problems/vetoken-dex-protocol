@@ -479,7 +479,6 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         if (msg.sender != guardian && msg.sender != owner()) {
             revert OnlyGuardianOrOwner();
         }
-        if (paused()) revert EnforcedPause();
 
         _pause();
 
@@ -492,8 +491,6 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
      * emergency but cannot unpause.
      */
     function unpause() public onlyOwner {
-        if (!paused()) revert ExpectedPause();
-
         _unpause();
     }
 
@@ -526,7 +523,7 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
     {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
-        if (to != address(0) && sweepRecipientAllowed[to] == false) revert InvalidSweepRecipient(to);
+        if (!sweepRecipientAllowed[to]) revert InvalidSweepRecipient(to);
         if (amount > unallocatedRewards) revert InsufficientUnallocatedRewards(amount, unallocatedRewards);
 
         unallocatedRewards -= amount;
@@ -543,7 +540,7 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
     function recoverExcessStakingToken(address to, uint256 amount) external nonReentrant onlyOwner {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
-        if (to != address(0) && sweepRecipientAllowed[to] == false) revert InvalidSweepRecipient(to);
+        if (!sweepRecipientAllowed[to]) revert InvalidSweepRecipient(to);
 
         uint256 excess = stakingToken.balanceOf(address(this)) - totalStaked;
         if (amount > excess) revert InsufficientExcessStakingToken(amount, excess);
@@ -565,7 +562,7 @@ contract StakingRewards is Ownable2Step, Pausable, ReentrancyGuard {
         if (to == address(0) || token == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
         if (token == address(stakingToken) || token == address(rewardToken)) revert CannotRecoverCoreToken(token);
-        if (sweepRecipientAllowed[to] == false) revert InvalidSweepRecipient(to);
+        if (!sweepRecipientAllowed[to]) revert InvalidSweepRecipient(to);
 
         IERC20 recoverToken = IERC20(token);
         recoverToken.safeTransfer(to, amount);

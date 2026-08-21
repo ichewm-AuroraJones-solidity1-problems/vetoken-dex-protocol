@@ -283,7 +283,7 @@ rewardsDuration = 7 days
 |---|---|
 | `lastTimeRewardApplicable()` | `periodFinish == 0 ? 0 : min(block.timestamp, periodFinish)` |
 | `rewardPerToken()` | 当前全局累计每单位质押奖励，`totalStaked == 0` 时返回 `rewardPerTokenStored` |
-| `earned(address user)` | 用户当前可领取奖励，包含已结算 `rewards[user]` 和实时新增部分 |
+| `earned(address user)` | 用户当前可领取奖励，包含已结算 `rewards[user]` 和实时新增部分；当 `user == address(0)` 时返回 `0`，不 revert |
 | `storedUnallocatedRewards()` | 当前存储中的 `unallocatedRewards`，不模拟 checkpoint，必须等于状态变量 `unallocatedRewards` |
 | `sweepableUnallocatedRewards()` | 如果现在调用 `sweepUnallocatedRewards`，理论上可 sweep 的金额；必须模拟 checkpoint 会新增的 pending unallocated reward |
 | `unreservedRewardBalance()` | 当前尚未进入内部会计分类的 rewardToken 余额；正常情况下应为 0，误转后可通过 `syncUnallocatedRewards` 归类 |

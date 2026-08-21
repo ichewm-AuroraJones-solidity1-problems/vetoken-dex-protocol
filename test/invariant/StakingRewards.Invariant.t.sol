@@ -34,10 +34,33 @@ contract StakingRewardsInvariantTest is Test {
         );
 
         handler = new StakingRewardsHandler(
-            stakingRewards, stakingToken, rewardToken, rewardManager, initialOwner, recoveryRecipient
+            stakingRewards, stakingToken, rewardToken, rewardManager, initialOwner, guardian, recoveryRecipient
         );
 
+        bytes4[] memory selectors = new bytes4[](15);
+        selectors[0] = StakingRewardsHandler.stake.selector;
+        selectors[1] = StakingRewardsHandler.withdraw.selector;
+        selectors[2] = StakingRewardsHandler.getReward.selector;
+        selectors[3] = StakingRewardsHandler.exit.selector;
+        selectors[4] = StakingRewardsHandler.emergencyExit.selector;
+        selectors[5] = StakingRewardsHandler.fundAndNotify.selector;
+        selectors[6] = StakingRewardsHandler.warp.selector;
+        selectors[7] = StakingRewardsHandler.syncUnallocatedRewards.selector;
+        selectors[8] = StakingRewardsHandler.sweepUnallocatedRewards.selector;
+        selectors[9] = StakingRewardsHandler.recoverExcessStakingToken.selector;
+        selectors[10] = StakingRewardsHandler.recoverERC20.selector;
+        selectors[11] = StakingRewardsHandler.setRewardManager.selector;
+        selectors[12] = StakingRewardsHandler.setGuardian.selector;
+        selectors[13] = StakingRewardsHandler.pause.selector;
+        selectors[14] = StakingRewardsHandler.unpause.selector;
+
         targetContract(address(handler));
+        targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
+
+        excludeContract(address(stakingRewards));
+        excludeContract(address(stakingToken));
+        excludeContract(address(rewardToken));
+        excludeContract(address(handler.recoverToken()));
     }
 
     function invariant_RewardAccountingBucketsSumAccountedBalance() public view {
@@ -64,7 +87,14 @@ contract StakingRewardsInvariantTest is Test {
     }
 
     function invariant_TotalStakedEqualsSumUserBalances() public view {
-        assertEq(stakingRewards.totalStaked(), handler.ghostStakes() - handler.ghostWithdraws());
+        uint256 sumBalances;
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            address actor = handler.actors(i);
+            sumBalances += stakingRewards.balanceOf(actor);
+        }
+
+        assertEq(stakingRewards.totalStaked(), sumBalances);
     }
 
     function invariant_AggregateClaimableEqualsSumUserRewards() public view {

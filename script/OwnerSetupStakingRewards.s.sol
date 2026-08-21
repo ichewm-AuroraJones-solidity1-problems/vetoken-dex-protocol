@@ -13,9 +13,13 @@ contract OwnerSetupStakingRewardsScript is Script {
         address rewardManager = vm.envAddress("REWARD_MANAGER");
         address recoveryRecipient = vm.envAddress("RECOVERY_RECIPIENT");
 
+        require(address(stakingRewards) != address(0), "STAKING_REWARDS_ZERO");
         require(treasury != address(0), "TREASURY_ZERO");
         require(rewardManager != address(0), "REWARD_MANAGER_ZERO");
         require(recoveryRecipient != address(0), "RECOVERY_RECIPIENT_ZERO");
+
+        address owner = vm.addr(ownerPrivateKey);
+        require(stakingRewards.owner() == vm.addr(ownerPrivateKey), "CALLER_NOT_OWNER");
 
         vm.startBroadcast(ownerPrivateKey);
 

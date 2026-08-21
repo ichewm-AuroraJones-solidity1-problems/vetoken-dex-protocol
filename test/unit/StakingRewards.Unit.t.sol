@@ -560,6 +560,19 @@ contract StakingRewardsUnitTest is Test {
         assertEq(stakingRewards.earned(alice), 0);
     }
 
+    function test_Earned_ZeroAddressReturnsZero() public {
+        uint256 stakeAmount = 1000;
+        uint256 rewardAmount = REWARD_DURATION;
+        uint256 elapsed = 10;
+
+        _stake(alice, stakeAmount);
+        _fundAndNotify(rewardAmount);
+
+        vm.warp(block.timestamp + elapsed);
+
+        assertEq(stakingRewards.earned(address(0)), 0);
+    }
+
     function test_Earned_IncreasesAfterTimePass() public {
         uint256 stakeAmount = 1000;
         uint256 rewardAmount = REWARD_DURATION;

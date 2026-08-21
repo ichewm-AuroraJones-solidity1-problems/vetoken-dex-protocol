@@ -13,6 +13,7 @@ import {ERC777HookMock} from "../mocks/ERC777HookMock.sol";
 import {BlacklistMock} from "../mocks/BlacklistMock.sol";
 import {PausableTokenMock} from "../mocks/PausableTokenMock.sol";
 import {FeeOnTransferMock} from "../mocks/FeeOnTransferMock.sol";
+import {RebasingMock} from "../mocks/RebasingMock.sol";
 
 contract StakingRewardsSecurityTest is Test {
     address initialOwner = makeAddr("initialOwner");
@@ -501,7 +502,40 @@ contract StakingRewardsSecurityTest is Test {
         assertEq(blacklistToken.balanceOf(address(blacklistStakingRewards)), rewardAmount);
     }
 
-    function test_BlacklistMock_RecoverExcessStakingTokenTransferFailureRollsBack() public {}
+    function test_BlacklistMock_RecoverExcessStakingTokenTransferFailureRollsBack() public {
+        uint256 stakeAmount = 1000;
+        uint256 excessAmount = 700;
+        BlacklistMock blacklistToken = new BlacklistMock("BlacklistToken", "BLK");
+        StakingRewards blacklistStakingRewards = new StakingRewards(
+            initialOwner, address(blacklistToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
+        );
+        blacklistToken.mint(alice, stakeAmount);
+        blacklistToken.setBlacklisted(alice, false);
+        vm.startPrank(alice);
+        blacklistToken.approve(address(blacklistStakingRewards), stakeAmount);
+        blacklistStakingRewards.stake(stakeAmount);
+        vm.stopPrank();
+
+        blacklistToken.mint(address(blacklistStakingRewards), excessAmount);
+
+        uint256 beforeContractBalance = blacklistToken.balanceOf(address(blacklistStakingRewards));
+        uint256 beforeRecipientBalance = blacklistToken.balanceOf(recoveryRecipient);
+        uint256 beforeTotalStaked = blacklistStakingRewards.totalStaked();
+        uint256 beforeAliceBalance = blacklistStakingRewards.balanceOf(alice);
+
+        vm.startPrank(initialOwner);
+        blacklistStakingRewards.setSweepRecipientAllowed(recoveryRecipient, true);
+        blacklistToken.setBlacklisted(recoveryRecipient, true);
+        vm.expectRevert(abi.encodeWithSelector(BlacklistMock.Blacklisted.selector, recoveryRecipient));
+        blacklistStakingRewards.recoverExcessStakingToken(recoveryRecipient, excessAmount);
+        vm.stopPrank();
+
+        assertEq(blacklistStakingRewards.totalStaked(), beforeTotalStaked);
+        assertEq(blacklistStakingRewards.balanceOf(alice), beforeAliceBalance);
+        assertEq(blacklistToken.balanceOf(address(blacklistStakingRewards)), beforeContractBalance);
+        assertEq(blacklistToken.balanceOf(recoveryRecipient), beforeRecipientBalance);
+        assertEq(beforeContractBalance - blacklistStakingRewards.totalStaked(), excessAmount);
+    }
 
     function test_BlacklistMock_RecoverERC20TransferFailureRollsBack() public {
         uint256 amount = 1000;
@@ -1074,5 +1108,83 @@ contract StakingRewardsSecurityTest is Test {
         FeeStakingRewards.fundAndNotify(2000);
 
         vm.stopPrank();
+    }
+
+    // --------------------------------------------------------------------------------------
+    // RebasingMock Tests
+    // --------------------------------------------------------------------------------------
+
+    function test_RebasingMock_AsStakingTokenUnsupportedAfterNegativeRebase() public {
+        uint256 stakeAmount = 1000;
+
+        RebasingMock rebasingToken = new RebasingMock("RebasingToken", "REB", 18);
+        StakingRewards rebasingStakingRewards = new StakingRewards(
+            initialOwner, address(rebasingToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
+        );
+
+        rebasingToken.mint(alice, stakeAmount);
+
+        vm.startPrank(alice);
+        rebasingToken.approve(address(rebasingStakingRewards), stakeAmount);
+        rebasingStakingRewards.stake(stakeAmount);
+        vm.stopPrank();
+
+        rebasingToken.setBalance(address(rebasingStakingRewards), stakeAmount / 2);
+
+        assertEq(rebasingStakingRewards.totalStaked(), stakeAmount);
+        assertEq(rebasingStakingRewards.balanceOf(alice), stakeAmount);
+        assertEq(rebasingToken.balanceOf(address(rebasingStakingRewards)), stakeAmount / 2);
+        assertLt(rebasingToken.balanceOf(address(rebasingStakingRewards)), rebasingStakingRewards.totalStaked());
+
+        vm.prank(alice);
+        vm.expectRevert();
+        rebasingStakingRewards.withdraw(stakeAmount);
+
+        assertEq(rebasingStakingRewards.totalStaked(), stakeAmount);
+        assertEq(rebasingStakingRewards.balanceOf(alice), stakeAmount);
+        assertEq(rebasingToken.balanceOf(address(rebasingStakingRewards)), stakeAmount / 2);
+        assertEq(rebasingToken.balanceOf(alice), 0);
+    }
+
+    function test_RebasingMock_AsRewardTokenUnsupportedAfterNegativeRebase() public {
+        uint256 stakeAmount = 1000;
+        uint256 rewardAmount = REWARD_DURATION;
+
+        RebasingMock rebasingRewardToken = new RebasingMock("RebasingReward", "RREB", 18);
+        StakingRewards rebasingStakingRewards = new StakingRewards(
+            initialOwner, address(stakingToken), address(rebasingRewardToken), rewardManager, guardian, REWARD_DURATION
+        );
+
+        stakingToken.mint(alice, stakeAmount);
+
+        vm.startPrank(alice);
+        stakingToken.approve(address(rebasingStakingRewards), stakeAmount);
+        rebasingStakingRewards.stake(stakeAmount);
+        vm.stopPrank();
+
+        rebasingRewardToken.mint(rewardManager, rewardAmount);
+
+        vm.startPrank(rewardManager);
+        rebasingRewardToken.approve(address(rebasingStakingRewards), rewardAmount);
+        rebasingStakingRewards.fundAndNotify(rewardAmount);
+        vm.stopPrank();
+
+        rebasingRewardToken.setBalance(address(rebasingStakingRewards), rewardAmount / 2);
+
+        assertEq(rebasingStakingRewards.accountedRewardBalance(), rewardAmount);
+        assertEq(rebasingRewardToken.balanceOf(address(rebasingStakingRewards)), rewardAmount / 2);
+        assertLt(
+            rebasingRewardToken.balanceOf(address(rebasingStakingRewards)),
+            rebasingStakingRewards.accountedRewardBalance()
+        );
+        vm.warp(block.timestamp + REWARD_DURATION);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        rebasingStakingRewards.getReward();
+
+        assertEq(rebasingStakingRewards.accountedRewardBalance(), rewardAmount);
+        assertEq(rebasingRewardToken.balanceOf(address(rebasingStakingRewards)), rewardAmount / 2);
+        assertEq(rebasingRewardToken.balanceOf(alice), 0);
     }
 }
