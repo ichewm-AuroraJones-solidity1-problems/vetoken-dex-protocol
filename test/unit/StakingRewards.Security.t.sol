@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {StakingRewards} from "../../src/StakingRewards.sol";
@@ -1137,7 +1138,14 @@ contract StakingRewardsSecurityTest is Test {
         assertLt(rebasingToken.balanceOf(address(rebasingStakingRewards)), rebasingStakingRewards.totalStaked());
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IERC20Errors.ERC20InsufficientBalance.selector,
+                address(rebasingStakingRewards),
+                stakeAmount / 2,
+                stakeAmount
+            )
+        );
         rebasingStakingRewards.withdraw(stakeAmount);
 
         assertEq(rebasingStakingRewards.totalStaked(), stakeAmount);
@@ -1180,11 +1188,98 @@ contract StakingRewardsSecurityTest is Test {
         vm.warp(block.timestamp + REWARD_DURATION);
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IERC20Errors.ERC20InsufficientBalance.selector,
+                address(rebasingStakingRewards),
+                rewardAmount / 2,
+                rewardAmount
+            )
+        );
         rebasingStakingRewards.getReward();
 
         assertEq(rebasingStakingRewards.accountedRewardBalance(), rewardAmount);
         assertEq(rebasingRewardToken.balanceOf(address(rebasingStakingRewards)), rewardAmount / 2);
         assertEq(rebasingRewardToken.balanceOf(alice), 0);
+    }
+
+    function test_RebasingMock_AsStakingTokenPositiveRebaseCreatesRecoverableExcess() public {
+        uint256 stakeAmount = 1000;
+        uint256 rebaseExtra = 300;
+
+        RebasingMock rebasingToken = new RebasingMock("RebasingToken", "REB", 18);
+        StakingRewards rebasingStakingRewards = new StakingRewards(
+            initialOwner, address(rebasingToken), address(rewardToken), rewardManager, guardian, REWARD_DURATION
+        );
+        rebasingToken.mint(alice, stakeAmount);
+
+        vm.startPrank(alice);
+        rebasingToken.approve(address(rebasingStakingRewards), stakeAmount);
+        rebasingStakingRewards.stake(stakeAmount);
+        vm.stopPrank();
+
+        rebasingToken.setBalance(address(rebasingStakingRewards), stakeAmount + rebaseExtra);
+
+        assertEq(rebasingStakingRewards.totalStaked(), stakeAmount);
+        assertEq(rebasingStakingRewards.balanceOf(alice), stakeAmount);
+        assertEq(rebasingToken.balanceOf(address(rebasingStakingRewards)), stakeAmount + rebaseExtra);
+        assertEq(
+            rebasingToken.balanceOf(address(rebasingStakingRewards)) - rebasingStakingRewards.totalStaked(), rebaseExtra
+        );
+
+        vm.startPrank(initialOwner);
+        rebasingStakingRewards.setSweepRecipientAllowed(recoveryRecipient, true);
+        rebasingStakingRewards.recoverExcessStakingToken(recoveryRecipient, rebaseExtra);
+        vm.stopPrank();
+
+        assertEq(rebasingStakingRewards.totalStaked(), stakeAmount);
+        assertEq(rebasingStakingRewards.balanceOf(alice), stakeAmount);
+        assertEq(rebasingToken.balanceOf(address(rebasingStakingRewards)), stakeAmount);
+        assertEq(rebasingToken.balanceOf(address(recoveryRecipient)), rebaseExtra);
+    }
+
+    function test_RebasingMock_AsRewardTokenPositiveRebaseCanBeSyncedAsUnallocated() public {
+        uint256 rewardAmount = REWARD_DURATION;
+        uint256 rebaseExtra = 300;
+
+        RebasingMock rebasingRewardToken = new RebasingMock("RebasingReward", "RREB", 18);
+        StakingRewards rebasingStakingRewards = new StakingRewards(
+            initialOwner, address(stakingToken), address(rebasingRewardToken), rewardManager, guardian, REWARD_DURATION
+        );
+        rebasingRewardToken.mint(rewardManager, rewardAmount);
+
+        vm.startPrank(rewardManager);
+        rebasingRewardToken.approve(address(rebasingStakingRewards), rewardAmount);
+        rebasingStakingRewards.fundAndNotify(rewardAmount);
+        vm.stopPrank();
+
+        assertEq(rebasingStakingRewards.accountedRewardBalance(), rewardAmount);
+        assertEq(rebasingStakingRewards.unreservedRewardBalance(), 0);
+        assertEq(rebasingStakingRewards.unallocatedRewards(), 0);
+
+        rebasingRewardToken.setBalance(address(rebasingStakingRewards), rewardAmount + rebaseExtra);
+
+        assertEq(rebasingStakingRewards.accountedRewardBalance(), rewardAmount);
+        assertEq(rebasingRewardToken.balanceOf(address(rebasingStakingRewards)), rewardAmount + rebaseExtra);
+        assertEq(rebasingStakingRewards.unreservedRewardBalance(), rebaseExtra);
+
+        rebasingStakingRewards.syncUnallocatedRewards();
+
+        assertEq(rebasingStakingRewards.unreservedRewardBalance(), 0);
+        assertEq(rebasingStakingRewards.unallocatedRewards(), rebaseExtra);
+        assertEq(rebasingStakingRewards.storedUnallocatedRewards(), rebaseExtra);
+        assertEq(rebasingStakingRewards.accountedRewardBalance(), rewardAmount + rebaseExtra);
+        assertEq(rebasingStakingRewards.scheduledRewards(), rewardAmount);
+
+        vm.startPrank(initialOwner);
+        rebasingStakingRewards.setSweepRecipientAllowed(recoveryRecipient, true);
+        rebasingStakingRewards.sweepUnallocatedRewards(recoveryRecipient, rebaseExtra);
+        vm.stopPrank();
+
+        assertEq(rebasingRewardToken.balanceOf(address(rebasingStakingRewards)), rewardAmount);
+        assertEq(rebasingRewardToken.balanceOf(recoveryRecipient), rebaseExtra);
+        assertEq(rebasingStakingRewards.unallocatedRewards(), 0);
+        assertEq(rebasingStakingRewards.accountedRewardBalance(), rewardAmount);
+        assertEq(rebasingStakingRewards.scheduledRewards(), rewardAmount);
     }
 }

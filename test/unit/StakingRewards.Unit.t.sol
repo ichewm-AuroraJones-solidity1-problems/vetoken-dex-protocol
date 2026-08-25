@@ -520,7 +520,7 @@ contract StakingRewardsUnitTest is Test {
         vm.stopPrank();
     }
 
-    function test_FundAndnotify_RevertWhenRewardAmountTooLarge() public {
+    function test_FundAndNotify_RevertWhenRewardAmountTooLarge() public {
         vm.startPrank(rewardManager);
         rewardToken.mint(rewardManager, MAX_REWARDS_AMOUNT + 2);
         rewardToken.approve(address(stakingRewards), MAX_REWARDS_AMOUNT + 2);

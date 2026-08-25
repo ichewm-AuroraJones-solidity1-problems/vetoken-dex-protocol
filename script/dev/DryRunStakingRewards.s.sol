@@ -2,11 +2,13 @@
 pragma solidity ^0.8.28;
 
 import {Script} from "forge-std/Script.sol";
-import {StakingRewards} from "../src/StakingRewards.sol";
-import {MockERC20} from "../test/mocks/MockERC20.sol";
+import {StakingRewards} from "../../src/StakingRewards.sol";
+import {MockERC20} from "../../test/mocks/MockERC20.sol";
 
 contract DryRunStakingRewardsScript is Script {
     function run() external {
+        require(block.chainid == 31337, "LOCAL_ONLY");
+
         uint256 rewardManagerPrivateKey = vm.envUint("REWARD_MANAGER_PRIVATE_KEY");
         uint256 userPrivateKey = vm.envUint("USER_PRIVATE_KEY");
 
